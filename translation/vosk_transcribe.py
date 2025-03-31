@@ -14,15 +14,13 @@ SetLogLevel(-1)
 
 # Constants
 # Path to the downloaded Vosk model
-MODEL_PATH = "translation/vosk-model-small-cn-0.22"
+CHINESE_MODEL_PATH = "translation/vosk-model-small-cn-0.22"
+JAPANESE_MODEL_PATH = "translation/vosk-model-small-ja-0.22"
 
 # Path to the input WAV file
 WAV_FILE_PATH = "human_input.wav"
 
-# Load the Vosk model
-MODEL = Model(MODEL_PATH)
-
-def transcribe(model = MODEL, file = WAV_FILE_PATH):
+def transcribe(file = WAV_FILE_PATH, tl = "Chinese"):
     """
     Uses a vosk model to transcribe a recorded WAV file to text in the target language
 
@@ -33,6 +31,9 @@ def transcribe(model = MODEL, file = WAV_FILE_PATH):
     Output:
     string:  the transcribed text in the target language 
     """
+        # Set model directory baesd on selected target language and Load the Vosk model
+    model = Model(CHINESE_MODEL_PATH) if tl == "Chinese" else Model(JAPANESE_MODEL_PATH)
+ 
         # Open the WAV file
     with wave.open(file, "rb") as wf:
         # Check if the audio file has the correct parameters

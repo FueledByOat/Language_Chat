@@ -1,0 +1,26 @@
+student_name	group_name	group_id
+Harlalka, Hriday	Classworks	430854
+Jacob, Neha Elizabeth	Classworks	430854
+Jain, Aditi	Classworks	430854
+Pfleegor, Alexandra Churchill	Classworks	430854
+Eser, Feyzi Can	Equifax	430856
+Kwon, Tae Eun	Equifax	430856
+Yuan, Qinghan	Equifax	430856
+Zhang, Boyu	Equifax	430856
+Goncalves, Austin R	GT Student Services	430858
+Hewett, Oliver Gregory	GT Student Services	430858
+Midha, Urvi	GT Student Services	430858
+Wang, Yu Fung David	GT Student Services	430858
+Goyal, Ayushi	SLB	430864
+Sudershan, Saksham	SLB	430864
+Toram, Prasanthi Mounika	SLB	430864
+Verma, Divyansh	SLB	430864
+Bankata Mishra, Spriha	Sysco	430866
+El Kontar, Rawad	Sysco	430866
+Patel, Hardik Dhaval	Sysco	430866
+Perumal, Akshaya Praba	Sysco	430866
+Tao, Haijiao	Sysco	430866
+Lu, Xiao	UPS	430868
+Quan, Junyuan	UPS	430868
+Shenoy, Aishwarya	UPS	430868
+Thatipalli, Manikant	UPS	430868
