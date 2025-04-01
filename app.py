@@ -106,37 +106,37 @@ def voice_chat():
     audio_file.save(input_audio_path)
 
     try:
-        print(input_audio_path)
         transcribed_text = translation.vosk_transcribe.transcribe(file = input_audio_path, tl = language)
         translated_user_text = translation.translator.translate_target_to_english(transcribed_text, language = language)
-        bot_response = language_model.language_model.bot_response(translated_user_text)
-        bot_response_english = translation.translator.translate_english_to_target(bot_response, language = language)
+        bot_response_english = language_model.language_model.bot_response(translated_user_text)
+        bot_response = translation.translator.translate_english_to_target(bot_response_english, language = language)
         
         # Placeholder responses for now
         if language == 'chinese':
-            transcribed_text = "这是用户说的中文"
-            translated_user_text = "This is what the user said in Chinese"
-            bot_response = "这是中文回复"
-            bot_response_english = "This is the English response"
+            transcribed_text = transcribed_text
+            translated_user_text = f"[English translation: {translated_user_text}]"
+            bot_response = bot_response
+            bot_response_english = bot_response_english
         else:  # japanese
-            transcribed_text = "これは日本語のユーザー入力です"
-            translated_user_text = "This is what the user said in Japanese"
-            bot_response = "これは日本語の応答です"
-            bot_response_english = "This is the English response"
+            transcribed_text = transcribed_text
+            translated_user_text = f"[English translation: {translated_user_text}]"
+            bot_response = bot_response
+            bot_response_english = bot_response_english
         
         # Generate speech and save audio file
-        output_audio_id = str(uuid.uuid4())
-        output_audio_path = os.path.join(AUDIO_DIR, f"{output_audio_id}.wav")
+        audio_id = str(uuid.uuid4())
+        audio_path = os.path.join(AUDIO_DIR, f"{audio_id}.mp3")
         
         # Generate TTS
-        audio_io.audio_io.speak(text = bot_response, language = language)
-        
+        audio_io.audio_io.speak(audio_path = audio_path, text = bot_response, language = language)
+        playsound(audio_path)
+
         return jsonify({
             'transcribedText': transcribed_text,
             'translatedUserText': translated_user_text,
             'botResponse': bot_response,
             'botResponseEnglish': bot_response_english,
-            'audioId': output_audio_id
+            'audioId': audio_id
         })
         
     except Exception as e:
