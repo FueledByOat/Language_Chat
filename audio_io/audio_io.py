@@ -4,48 +4,7 @@ audio_io.py
 This module provides a function to listen for user input in the Target Language (TL) as well as a function to output the language model translated text in the TL using a voice installed on the host OS.  
 """
 
-import pyaudio
-import wave
 import pyttsx3
-
-# Constants
-CHUNK = 1024
-FORMAT = pyaudio.paInt16
-CHANNELS = 1
-RATE = 44100
-RECORD_SECONDS = 3
-
-# Variables
-
-def listen():
-    """
-    Uses the onboard microphone to record the user speaking in their TL.  Currently, recording continues until a keyboard interrupt is issued with CTRL+C
-    """
-    with wave.open('human_input.wav', 'wb') as wf:
-        p = pyaudio.PyAudio()
-        wf.setnchannels(CHANNELS)
-        wf.setsampwidth(p.get_sample_size(FORMAT))
-        wf.setframerate(RATE)
-
-        stream = p.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True)
-
-        # print('Recording...')
-        # for _ in range(0, RATE // CHUNK * RECORD_SECONDS):
-        #     wf.writeframes(stream.read(CHUNK))
-        # print('Done')
-
-        print('\nRecording...Press CTRL+C to end Recording')
-        try:
-            while True:
-                wf.writeframes(stream.read(CHUNK))
-        except KeyboardInterrupt:
-            pass
-        
-        print('Done')
-
-        stream.close()
-        p.terminate()
-
 
 def speak(audio_path, text, language = "chinese"):
     """

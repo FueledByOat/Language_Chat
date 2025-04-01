@@ -6,12 +6,6 @@ This module provides functions to translate between the target language and Engl
 
 from deep_translator import GoogleTranslator
 
-# Constants
-# TRANSLATOR = Translator()
-
-# Variables
-
-
 def translate_target_to_english(input_text, language = "chinese"):
     """
     Uses the the google translate library to translate text from a target input language to English

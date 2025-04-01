@@ -4,7 +4,6 @@ language_model.py
 This module initializes a language model to respond to the users input  
 """
 
-import torch
 import logging
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
