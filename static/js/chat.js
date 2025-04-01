@@ -134,12 +134,16 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // Function to handle voice recording
     async function toggleRecording() {
+        const sampleRate = 44100;
+        const numChannels = 1;
+        const bitsPerSample = 16;
+        
         if (!isRecording) {
             // Start recording
             audioChunks = [];
             
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate, channelCount: numChannels } });
                 
                 // Explicitly specify audio/webm MIME type for broad compatibility
                 mediaRecorder = new MediaRecorder(stream);

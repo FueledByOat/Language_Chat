@@ -12,7 +12,7 @@ from deep_translator import GoogleTranslator
 # Variables
 
 
-def translate_target_to_english(input_text, language = "Chinese"):
+def translate_target_to_english(input_text, language = "chinese"):
     """
     Uses the the google translate library to translate text from a target input language to English
 
@@ -24,14 +24,14 @@ def translate_target_to_english(input_text, language = "Chinese"):
     string:  the translated text in English 
     """
     #  tl (string): Target language langauge code 
-    tl = "zh-CN" if language == "Chinese" else "ja"
+    tl = "zh-CN" if language == "chinese" else "ja"
     # translated = await TRANSLATOR.translate(input_text, dest = 'en', src = tl)
     translated = GoogleTranslator(source = tl, target = "en").translate(input_text)
     print(f"Input: {translated}")
     return translated
 
 
-def translate_english_to_target(output_text, language = "Chinese"):
+def translate_english_to_target(output_text, language = "chinese"):
     """
     Uses the the google translate library to translate text from English to a target input language 
 
@@ -43,7 +43,7 @@ def translate_english_to_target(output_text, language = "Chinese"):
     string:  the translated text in the target language 
     """
     #   tl (string): Target language langauge code 
-    tl = "zh-CN" if language == "Chinese" else "ja"
+    tl = "zh-CN" if language == "chinese" else "ja"
     # translated = await TRANSLATOR.translate(output_text, dest=tl, src='en')
     translated = GoogleTranslator(source = "en", target = tl).translate(output_text)
     print(translated)  

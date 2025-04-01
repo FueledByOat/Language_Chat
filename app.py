@@ -11,9 +11,14 @@ import translation.translator
 import translation.vosk_transcribe
 import utils.helper
 import time
+from playsound3 import playsound
 # Import your existing chat model implementation
 # from your_module import your_chat_function
 
+# Delete all old audio files upon startup
+utils.helper.cleanup()
+
+# Intantiate App
 app = Flask(__name__)
 
 # Directory for audio files
@@ -53,25 +58,29 @@ def text_chat():
     # Replace the following lines with your actual implementation
     # translated_user_text = your_translation_function(user_message, 'english')
     # bot_response, bot_response_english = your_chat_function(user_message, language)
-    
+    translated_user_text = translation.translator.translate_target_to_english(user_message, language = language)
+    bot_response_english = language_model.language_model.bot_response(translated_user_text)
+    bot_response = translation.translator.translate_english_to_target(bot_response_english, language = language)
+        
     # Placeholder responses for now
     if language == 'chinese':
-        translated_user_text = f"[English translation of: {user_message}]"
-        bot_response = f"这是中文回复"
-        bot_response_english = "This is the English response"
+        translated_user_text = f"[English translation: {translated_user_text}]"
+        bot_response = bot_response
+        bot_response_english = bot_response_english
     else:  # japanese
-        translated_user_text = f"[English translation of: {user_message}]"
-        bot_response = f"これは日本語の応答です"
-        bot_response_english = "This is the English response"
+        translated_user_text = f"[English translation: {translated_user_text}]"
+        bot_response = bot_response
+        bot_response_english = bot_response_english
     
     # Generate speech and save audio file
     audio_id = str(uuid.uuid4())
-    audio_path = os.path.join(AUDIO_DIR, f"{audio_id}.wav")
+    audio_path = os.path.join(AUDIO_DIR, f"{audio_id}.mp3")
     
-    # Generate TTS
-    engine.save_to_file(bot_response, audio_path)
-    engine.runAndWait()
-    
+    # Generate TTS file
+    audio_io.audio_io.speak(audio_path = audio_path, text = bot_response, language = language)
+    playsound(audio_path)
+
+
     return jsonify({
         'translatedUserText': translated_user_text,
         'botResponse': bot_response,
@@ -120,8 +129,7 @@ def voice_chat():
         output_audio_path = os.path.join(AUDIO_DIR, f"{output_audio_id}.wav")
         
         # Generate TTS
-        engine.save_to_file(bot_response, output_audio_path)
-        engine.runAndWait()
+        audio_io.audio_io.speak(text = bot_response, language = language)
         
         return jsonify({
             'transcribedText': transcribed_text,
@@ -143,22 +151,15 @@ def play_audio(audio_id):
     if not audio_id or '..' in audio_id or '/' in audio_id:
         return jsonify({'error': 'Invalid audio ID'}), 400
     
-    audio_path = os.path.join(AUDIO_DIR, f"{audio_id}.wav")
+    audio_path = os.path.join(AUDIO_DIR, f"{audio_id}.mp3")
     
     if not os.path.exists(audio_path):
         return jsonify({'error': 'Audio file not found'}), 404
-    
-    # Speak the audio using pyttsx3
-    # In a real implementation, this would be handled client-side
-    # This is just a placeholder to simulate the TTS process
-    with open(audio_path, 'rb') as f:
-        audio_data = f.read()
-        
+
     # This would trigger your existing code:
-    # engine.say(text_to_speak)
-    # engine.runAndWait()
+    playsound(audio_path)
     
-    return send_from_directory(AUDIO_DIR, f"{audio_id}.wav")
+    return send_from_directory(AUDIO_DIR, f"{audio_id}.mp3")
 
 if __name__ == '__main__':
     app.run(debug=True, port=5170)

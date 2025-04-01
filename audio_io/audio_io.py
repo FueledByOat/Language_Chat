@@ -47,7 +47,7 @@ def listen():
         p.terminate()
 
 
-def speak(text, language = "Chinese"):
+def speak(audio_path, text, language = "chinese"):
     """
     Uses the onboard speakers and built in language packages to say the text that is passed into the function
     
@@ -65,13 +65,13 @@ def speak(text, language = "Chinese"):
 
     # List available voices and set the voice to a Chinese one if available
     voices = engine.getProperty('voices')
-    if language == "Chinese":
+    if language == "chinese":
         for voice in voices:
             # print(f"Voice: {voice.name}, ID: {voice.id}, Languages: {voice.languages}")
             if 'ZH' in voice.languages or 'ZH-CN' in voice.id:
                 engine.setProperty('voice', voice.id)
                 break
-    if language == "Japanese":
+    if language == "japanese":
         for voice in voices:
             # print(f"Voice: {voice.name}, ID: {voice.id}, Languages: {voice.languages}")
             if 'JA' in voice.languages or 'JA-JP' in voice.id:
@@ -82,5 +82,6 @@ def speak(text, language = "Chinese"):
     text_to_speak = text
 
     # Speak the text
-    engine.say(text_to_speak)
+    # engine.say(text_to_speak)
+    engine.save_to_file(text_to_speak, audio_path)
     engine.runAndWait()
