@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>中文对话助手 | Chinese Chat Assistant</title>
+    <link rel="stylesheet" href="../static/css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="chat-container">
+            <div class="chat-header chinese">
+                <div class="icon chinese">中</div>
+                <h2>中文对话助手</h2>
+            </div>
+            
+            <div class="chat-messages" id="chatMessages">
+                <div class="message bot-message">您好！我是中文对话助手。请点击下方的麦克风按钮开始交谈。</div>
+                <!-- Chat messages will be added here dynamically -->
+            </div>
+            
+            <div class="voice-input-container">
+                <button id="recordButton" class="record-button">
+                    <span class="mic-icon">🎤</span>
+                    <span class="button-text">按下开始录音</span>
+                </button>
+                <div class="recording-status" id="recordingStatus">准备就绪</div>
+            </div>
+            
+            <div class="chat-input-container">
+                <input type="text" class="chat-input" id="userInput" placeholder="或者在此输入文字..." autocomplete="off">
+                <button class="send-button" id="sendButton">发送</button>
+            </div>
+            
+            <a href="index.html" class="back-link">← 返回主页</a>
+        </div>
+        
+        <footer>
+            <p>Powered by Python NLP</p>
+        </footer>
+    </div>
+    
+    <script src="../static/js/chat.js"></script>
+</body>
+</html>
