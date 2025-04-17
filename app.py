@@ -28,11 +28,6 @@ os.makedirs(AUDIO_DIR, exist_ok=True)
 # Initialize text-to-speech engine
 engine = pyttsx3.init()
 
-# Serve static files
-@app.route('/<path:path>')
-def serve_static(path):
-    return send_from_directory('.', path)
-
 # Serve home page
 @app.route('/')
 def home():
