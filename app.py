@@ -179,8 +179,8 @@ def play_audio(audio_id):
     
     return send_from_directory(AUDIO_DIR, f"{audio_id}.mp3")
 
-@app.route('/api/image_guess')
-def image_guess(audio_id):
+@app.route('/api/image_guess', methods=['POST'])
+def image_guess():
     if 'audio' not in request.files:
         return jsonify({'error': 'No audio file provided'}), 400
     
