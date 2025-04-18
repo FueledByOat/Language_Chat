@@ -15,8 +15,7 @@ from playsound3 import playsound
 from transformers import pipeline
 import skimage
 import numpy as np
-from PIL import Image
-from PIL import ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 import base64
 from io import BytesIO
 
@@ -231,7 +230,7 @@ def image_guess():
             draw.text((xmin, ymin), f"{label.title()}: {round(score,2)}", fill="blue")
 
         buffered = BytesIO()
-        draw.save(buffered, format="JPEG")
+        img.save(buffered, format="JPEG")
         img_str = base64.b64encode(buffered.getvalue()).decode('utf-8')
 
         # Return the image as a base64-encoded string
