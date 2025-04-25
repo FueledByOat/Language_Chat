@@ -1,42 +1,58 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Bilingual Chat Assistant</title>
     <link rel="stylesheet" href="../static/css/styles.css">
 </head>
+
 <body>
     <div class="container">
         <header>
-            <h1>Language Chat Assistant</h1>
+            <h1>Language Learning Assistant</h1>
             <div class="language-icons">
                 <div class="icon chinese">中</div>
                 <div class="icon japanese">日</div>
             </div>
         </header>
-        
+
         <main>
-            <p class="welcome-text">Welcome to your chat assistant. Select a language to start your conversation.</p>
-            
+            <p class="welcome-text">Welcome to your language assistant. Select an experience to begin.</p>
+
             <div class="language-selection">
+                <a href="{{ url_for('chinese_image') }}" class="language-card chinese">
+                    <h2>中国图片</h2>
+                    <p>Chinese Image</p>
+                    <div class="card-decoration"></div>
+                </a>
+
                 <a href="{{ url_for('chinese') }}" class="language-card chinese">
-                    <h2>中文</h2>
-                    <p>Chinese</p>
+                    <h2>中文聊天</h2>
+                    <p>Chinese Chat</p>
                     <div class="card-decoration"></div>
                 </a>
-                
-                <a href="{{ url_for('japanese') }}" class="language-card japanese">
-                    <h2>日本語</h2>
-                    <p>Japanese</p>
-                    <div class="card-decoration"></div>
-                </a>
-            </div>
+                <div class="language-selection">
+                    <a href="{{ url_for('japanese_image') }}" class="language-card japanese">
+                        <h2>日本ピクチャーズ</h2>
+                        <p>Japanese Image</p>
+                        <div class="card-decoration"></div>
+                    </a>
+
+
+                    <a href="{{ url_for('japanese') }}" class="language-card japanese">
+                        <h2>日本語</h2>
+                        <p>Japanese Chat</p>
+                        <div class="card-decoration"></div>
+                    </a>
+                </div>
         </main>
-        
+
         <footer>
             <p>Powered by Python NLP</p>
         </footer>
     </div>
 </body>
+
 </html>

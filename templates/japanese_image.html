@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>日本の画像当てクイズ | Japanese Image Guesser</title>
+    <link rel="stylesheet" href="../static/css/styles.css">
+</head>
+
+<body>
+    <div class="container">
+        <div class="chat-container">
+            <div class="chat-header japanese">
+                <div class="icon japanese">中</div>
+                <h2>日本の画像当てクイズ</h2>
+            </div>
+
+            <div class="chat-header japanese">
+                <h3>何が見えますか?</h3>
+            </div>
+            {% if img_file %}
+            <div>
+                <img id='dynamic-image' src="{{ img_file }}" alt="Random Image"
+                    class="medium-image">
+            </div>
+            {% endif %}
+            <div class="voice-input-container">
+                <button id="recordButton" class="record-button">
+                    <span class="mic-icon">🎤</span>
+                    <span class="button-text">クリックして録音開始</span>
+                </button>
+                <div class="recording-status" id="recordingStatus">准备就绪</div>
+            </div>
+
+            <a href="{{ url_for('home') }}" class="back-link">← ホームに戻る</a>
+        </div>
+
+        <footer>
+            <p>Powered by Python NLP</p>
+        </footer>
+    </div>
+
+    <script src="../static/js/image.js"></script>
+</body>
+
+</html>
