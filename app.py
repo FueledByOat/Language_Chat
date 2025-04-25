@@ -18,6 +18,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 import base64
 from io import BytesIO
+import requests
 
 # Import your existing chat model implementation
 # from your_module import your_chat_function
@@ -62,7 +63,28 @@ def chinese_image():
     audio_path = os.path.join(AUDIO_DIR, f"{audio_id}.mp3")
     audio_io.audio_io.speak(audio_path = audio_path, text = bot_response, language = "chinese")
 
-    return render_template('chinese_image.html')
+    r = requests.get("https://picsum.photos/400/400")
+    img_file = r.url
+
+    return render_template('chinese_image.html', img_file = img_file)
+
+@app.route('/japanese_image')
+def japanese_image():
+    # Load supporting libraries
+
+    checkpoint = "google/owlv2-base-patch16-ensemble"
+    global detector 
+    detector = pipeline(model=checkpoint, task="zero-shot-object-detection")
+    
+    bot_response = translation.translator.translate_english_to_target("What do you see?", language = "japanese")
+    audio_id = "japanese_image"
+    audio_path = os.path.join(AUDIO_DIR, f"{audio_id}.mp3")
+    audio_io.audio_io.speak(audio_path = audio_path, text = bot_response, language = "japanese")
+
+    r = requests.get("https://picsum.photos/400/400")
+    img_file = r.url
+
+    return render_template('japanese_image.html', img_file = img_file)
 
 # API endpoint for text chat
 @app.route('/api/text-chat', methods=['POST'])
@@ -194,15 +216,15 @@ def image_guess():
 
     audio_file.save(input_audio_path)
 
-    # Temproary Image File
     # Specify the path to the image file
-    image_path = r"static\img\360_F_236992283_sNOxCVQeFLd5pdqaKGh8DRGMZy7P4XKm.jpg"
+    image_url = request.form.get("image_url")
+    image_data = requests.get(image_url)
 
     # Open the image using Image.open()
     try:
-        img = Image.open(image_path)
+        img = Image.open(BytesIO(image_data.content))
     except FileNotFoundError:
-        print(f"Error: Image file not found at {image_path}")
+        print(f"Error: Image file not found at {image_url}")
     except Exception as e:
         print(f"An error occurred: {e}")
 

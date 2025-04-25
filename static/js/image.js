@@ -5,6 +5,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const recordButton = document.getElementById('recordButton');
     const recordingStatus = document.getElementById('recordingStatus');
     const language = window.location.pathname.includes('chinese') ? 'chinese' : 'japanese';
+    const url = document.getElementById('dynamic-image').src;
 
     let mediaRecorder;
     let audioChunks = [];
@@ -48,53 +49,6 @@ document.addEventListener('DOMContentLoaded', function () {
             });
     }
 
-    // Function to send text message
-    async function sendTextMessage() {
-        const message = userInput.value.trim();
-        if (message === '') return;
-
-        // Clear input field
-        userInput.value = '';
-
-        // Show loading state
-        recordingStatus.textContent = "处理中...";
-
-        try {
-            // Get language from the page URL
-            // const language = window.location.pathname.includes('chinese') ? 'chinese' : 'japanese';
-
-            // Send message to backend and get response
-            const response = await fetch('/api/text-chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    message: message,
-                    language: language
-                })
-            });
-
-            if (!response.ok) {
-                throw new Error('Network response was not ok');
-            }
-
-            const data = await response.json();
-
-            // Add user message to chat
-            addUserMessage(message, data.translatedUserText);
-
-            // Add bot response to chat
-            addBotMessage(data.botResponse, data.botResponseEnglish, data.audioId);
-
-            // Reset status
-            recordingStatus.textContent = "准备就绪";
-
-        } catch (error) {
-            console.error('Error:', error);
-            recordingStatus.textContent = "发生错误，请重试";
-        }
-    }
 
     // Function to handle voice recording
     async function toggleRecording() {
@@ -140,6 +94,7 @@ document.addEventListener('DOMContentLoaded', function () {
                     const formData = new FormData();
                     formData.append('audio', wavBlob, 'recording.wav');
                     formData.append('language', window.location.pathname.includes('chinese') ? 'chinese' : 'japanese');
+                    formData.append('image_url', url);
 
                     try {
                         // Send audio to backend

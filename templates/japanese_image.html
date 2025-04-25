@@ -1,23 +1,23 @@
 <!DOCTYPE html>
-<html lang="zh">
+<html lang="ja">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>中文图像猜测器 | Chinese Image Guesser</title>
+    <title>日本の画像当てクイズ | Japanese Image Guesser</title>
     <link rel="stylesheet" href="../static/css/styles.css">
 </head>
 
 <body>
     <div class="container">
         <div class="chat-container">
-            <div class="chat-header chinese">
-                <div class="icon chinese">中</div>
-                <h2>中文图像猜测器</h2>
+            <div class="chat-header japanese">
+                <div class="icon japanese">中</div>
+                <h2>日本の画像当てクイズ</h2>
             </div>
 
-            <div class="chat-header chinese">
-                <h3>你看到了什么?</h3>
+            <div class="chat-header japanese">
+                <h3>何が見えますか?</h3>
             </div>
             {% if img_file %}
             <div>
@@ -28,12 +28,12 @@
             <div class="voice-input-container">
                 <button id="recordButton" class="record-button">
                     <span class="mic-icon">🎤</span>
-                    <span class="button-text">按下开始录音</span>
+                    <span class="button-text">クリックして録音開始</span>
                 </button>
                 <div class="recording-status" id="recordingStatus">准备就绪</div>
             </div>
 
-            <a href="{{ url_for('home') }}" class="back-link">← 返回主页</a>
+            <a href="{{ url_for('home') }}" class="back-link">← ホームに戻る</a>
         </div>
 
         <footer>
