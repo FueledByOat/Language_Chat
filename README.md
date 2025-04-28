@@ -1,13 +1,19 @@
 # Language Conversation Web App
 
-This project is a web-based language conversation tool that facilitates real-time transcription, translation, and dialogue generation for **Chinese** and **Japanese**. It uses **Vosk** for speech recognition, **Hugging Face transformers** for natural language processing, and **DialoGPT** for conversational AI.
+This project is a web-based language tool that currently has two modes, conversation through text and chat, as well as an image guessing game to identify items within a random image. 
+**Facilitates real-time transcription, translation, and dialogue generation for **Chinese** and **Japanese**. It uses **Vosk** for speech recognition, **Hugging Face transformers** for natural language processing, and **DialoGPT** for conversational AI.
 
 ## 📌 Features  
+### Conversation Mode 
 - **Speech Recognition**: Converts spoken Chinese and Japanese into text using **Vosk**  
 - **Machine Translation**: Translates recognized speech into English  
 - **Conversational AI**: Generates context-aware responses with **DialoGPT**  
 - **Text-to-Speech (TTS)**: Outputs responses in the original language  
-- **Web-Based Interface**: Built using **Python and JavaScript** for interactive usage  
+- **Web-Based Interface**: Built using **Python and JavaScript** for interactive usage
+
+### Image Game Mode 
+- **Speech Recognition**: Converts spoken Chinese and Japanese into text using **Vosk**
+- **Zero Shot Object Detection**: Identifies supplied text within a random image using **google/owlv2-base-patch16-ensemble**
 
 ## 🛠️ Setup Instructions  
 ### **1. Clone the Repository**  
@@ -35,15 +41,15 @@ python app.py
 ├── app.py             # Main application script
 ├── static/            # JavaScript and CSS files
 ├── templates/         # HTML templates for the UI
-├── models/            # Pre-trained language models
+├── translation/       # Pre-trained language models and custom functions
+├── audio_io/          # Processes user input and output
 ├── requirements.txt   # Dependencies
 └── README.md          # Project documentation
 ```
 
 ## 🚀 Planned Features  
-- Improve AI-generated responses using fine-tuned **DialoGPT**  
-- Support additional languages  
-- Enhance UI with real-time speech visualization  
+- Improve AI-generated responses using fine-tuned **DialoGPT** or a different language model
+- Enhance UI with real-time speech visualization of Pinyin
 
 ## 🤝 Contributing  
 1. Fork the repo  
