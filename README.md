@@ -1,4 +1,4 @@
-# Language Conversation Web App
+# Language Learning Web App
 
 This project is a web-based language tool that currently has two modes, conversation through text and chat, as well as an image guessing game to identify items within a random image. 
 **Facilitates real-time transcription, translation, and dialogue generation for **Chinese** and **Japanese**. It uses **Vosk** for speech recognition, **Hugging Face transformers** for natural language processing, and **DialoGPT** for conversational AI.
