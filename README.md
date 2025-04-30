@@ -48,6 +48,13 @@ python app.py
 ├── requirements.txt   # Dependencies
 └── README.md          # Project documentation
 ```
+### ⌨️ Technologies Used
+- Python
+- JavaScript
+- HTML
+- React
+- Transformers
+- LLM's
 
 ## 🚀 Planned Features  
 - Improve AI-generated responses using fine-tuned **DialoGPT** or a different language model
