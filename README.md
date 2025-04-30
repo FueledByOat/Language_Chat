@@ -15,7 +15,7 @@ This project is a web-based language tool that currently has two modes, conversa
 - **Speech Recognition**: Converts spoken Chinese and Japanese into text using **Vosk**
 - **Zero Shot Object Detection**: Identifies supplied text within a random image using **google/owlv2-base-patch16-ensemble**
 
-[![20250430_Demo](https://img.youtube.com/vi/7V21e2jXlg8 /0.jpg)](https://www.youtube.com/watch?v=7V21e2jXlg8 )
+[![20250430_Demo](https://img.youtube.com/vi/7V21e2jXlg8/0.jpg)](https://www.youtube.com/watch?v=7V21e2jXlg8)
 
 ## 🛠️ Setup Instructions  
 ### **1. Clone the Repository**  
