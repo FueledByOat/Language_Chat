@@ -19,7 +19,6 @@ def translate_target_to_english(input_text, language = "chinese"):
     """
     #  tl (string): Target language langauge code 
     tl = "zh-CN" if language == "chinese" else "ja"
-    # translated = await TRANSLATOR.translate(input_text, dest = 'en', src = tl)
     translated = GoogleTranslator(source = tl, target = "en").translate(input_text)
     print(f"Input: {translated}")
     return translated
@@ -38,7 +37,6 @@ def translate_english_to_target(output_text, language = "chinese"):
     """
     #   tl (string): Target language langauge code 
     tl = "zh-CN" if language == "chinese" else "ja"
-    # translated = await TRANSLATOR.translate(output_text, dest=tl, src='en')
     translated = GoogleTranslator(source = "en", target = tl).translate(output_text)
     print(translated)  
     return translated
