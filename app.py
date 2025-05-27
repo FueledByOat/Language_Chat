@@ -177,8 +177,8 @@ class LanguageLearningApp:
         
         try:
             # Generate welcome message in target language
-            bot_response = translation_service.translate_english_to_target(
-                "What do you see?", language=language
+            bot_response = translation_service.Translator().translate_from_english(
+                "What do you see?", language
             )
             
             # Generate or retrieve cached audio
@@ -444,16 +444,16 @@ class LanguageLearningApp:
             Dictionary with conversation results
         """
         # Translate user message to English
-        translated_user_text = translation_service.translate_target_to_english(
-            user_message, language=language
+        translated_user_text = translation_service.Translator().translate_to_english(
+            user_message, language
         )
         
         # Generate bot response in English
         bot_response_english = self.language_model.generate_response(translated_user_text, use_history=False)
         
         # Translate bot response to target language
-        bot_response = translation_service.translate_english_to_target(
-            bot_response_english, language=language
+        bot_response = translation_service.Translator().translate_from_english(
+            bot_response_english, language
         )
         
         # Generate audio for bot response
@@ -544,8 +544,8 @@ class LanguageLearningApp:
             )
             
             # Translate to English for object detection
-            translated_guess = translation_service.translate_target_to_english(
-                transcribed_text, language=language
+            translated_guess = translation_service.Translator().translate_to_english(
+                transcribed_text, language
             )
             
             # Fetch and process image

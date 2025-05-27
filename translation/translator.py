@@ -159,15 +159,3 @@ class Translator:
             error_msg = f"Unexpected translation error: {str(e)}"
             self.logger.error(error_msg)
             raise TranslationError(error_msg) from e
-
-
-# Backward compatibility functions
-_default_translator = Translator()
-
-def translate_target_to_english(input_text: str, language: str = "chinese") -> str:
-    """Legacy function for backward compatibility."""
-    return _default_translator.translate_to_english(input_text, language)
-
-def translate_english_to_target(output_text: str, language: str = "chinese") -> str:
-    """Legacy function for backward compatibility."""
-    return _default_translator.translate_from_english(output_text, language)
