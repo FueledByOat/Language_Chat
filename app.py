@@ -1,7 +1,7 @@
 from flask import Flask, request, send_file, jsonify, render_template, send_from_directory
 import os
 import uuid
-import pyttsx3
+import logging
 import audio_io
 import audio_io.audio_io
 import language_model
@@ -10,38 +10,44 @@ import translation
 import translation.translator
 import translation.vosk_transcribe
 import utils.helper
-import time
 from playsound3 import playsound
 from transformers import pipeline
-import skimage
-import numpy as np
 from PIL import Image, ImageDraw
 import base64
 from io import BytesIO
 import requests
+from config import Config
 
-# Import your existing chat model implementation
-# from your_module import your_chat_function
+logger = logging.getLogger(__name__)
 
 # Delete all old audio files upon startup
 utils.helper.cleanup()
 
-# Intantiate App
+# -------------------------------------
+# Flask and Language Model setup and initialization
+# -------------------------------------
+
 app = Flask(__name__)
 
 # Directory for audio files
-AUDIO_DIR = 'audio'
-os.makedirs(AUDIO_DIR, exist_ok=True)
+os.makedirs(Config.AUDIO_DIR, exist_ok=True)
 
-# Initialize text-to-speech engine
-engine = pyttsx3.init()
+# Load Zero Shot Detector
+try:
+    DETECTOR = pipeline(model=Config.DETECTOR_CHECKPOINT, task="zero-shot-object-detection")
+    app.logger.info(f"Successfully loaded detector model: {Config.DETECTOR_CHECKPOINT}")
+except Exception as e:
+    app.logger.error(f"Failed to load detector model: {e}", exc_info=True)
+    DETECTOR = None # Or handle startup failure appropriately
 
-# Serve home page
+# -------------------------------------
+# Home Page Endpoints
+# -------------------------------------
+
 @app.route('/')
 def home():
     return render_template('index.html')
 
-# Serve language-specific pages
 @app.route('/chinese')
 def chinese():
     return render_template('chinese.html')
@@ -54,13 +60,13 @@ def japanese():
 def chinese_image():
     # Load supporting libraries
 
-    checkpoint = "google/owlv2-base-patch16-ensemble"
+
     global detector 
-    detector = pipeline(model=checkpoint, task="zero-shot-object-detection")
+    detector = pipeline(model=Config.DETECTOR_CHECKPOINT, task="zero-shot-object-detection")
     
     bot_response = translation.translator.translate_english_to_target("What do you see?", language = "chinese")
     audio_id = "chinese_image"
-    audio_path = os.path.join(AUDIO_DIR, f"{audio_id}.mp3")
+    audio_path = os.path.join(Config.AUDIO_DIR, f"{audio_id}.mp3")
     audio_io.audio_io.speak(audio_path = audio_path, text = bot_response, language = "chinese")
 
     r = requests.get("https://picsum.photos/400/400")
@@ -72,13 +78,13 @@ def chinese_image():
 def japanese_image():
     # Load supporting libraries
 
-    checkpoint = "google/owlv2-base-patch16-ensemble"
+
     global detector 
-    detector = pipeline(model=checkpoint, task="zero-shot-object-detection")
+    detector = pipeline(model=Config.DETECTOR_CHECKPOINT, task="zero-shot-object-detection")
     
     bot_response = translation.translator.translate_english_to_target("What do you see?", language = "japanese")
     audio_id = "japanese_image"
-    audio_path = os.path.join(AUDIO_DIR, f"{audio_id}.mp3")
+    audio_path = os.path.join(Config.AUDIO_DIR, f"{audio_id}.mp3")
     audio_io.audio_io.speak(audio_path = audio_path, text = bot_response, language = "japanese")
 
     r = requests.get("https://picsum.photos/400/400")
@@ -92,11 +98,7 @@ def text_chat():
     data = request.json
     user_message = data.get('message', '')
     language = data.get('language', '')
-    
-    # Here you would call your existing chat model function
-    # Replace the following lines with your actual implementation
-    # translated_user_text = your_translation_function(user_message, 'english')
-    # bot_response, bot_response_english = your_chat_function(user_message, language)
+
     translated_user_text = translation.translator.translate_target_to_english(user_message, language = language)
     bot_response_english = language_model.language_model.bot_response(translated_user_text)
     bot_response = translation.translator.translate_english_to_target(bot_response_english, language = language)
@@ -113,7 +115,7 @@ def text_chat():
     
     # Generate speech and save audio file
     audio_id = str(uuid.uuid4())
-    audio_path = os.path.join(AUDIO_DIR, f"{audio_id}.mp3")
+    audio_path = os.path.join(Config.AUDIO_DIR, f"{audio_id}.mp3")
     
     # Generate TTS file
     audio_io.audio_io.speak(audio_path = audio_path, text = bot_response, language = language)
@@ -138,7 +140,7 @@ def voice_chat():
     
     # Generate a unique filename
     input_audio_id = str(uuid.uuid4())
-    input_audio_path = os.path.join(AUDIO_DIR, f"{input_audio_id}.wav")  # Save as webm
+    input_audio_path = os.path.join(Config.AUDIO_DIR, f"{input_audio_id}.wav")  # Save as webm
     
     # Save the uploaded audio file
 
@@ -164,7 +166,7 @@ def voice_chat():
         
         # Generate speech and save audio file
         audio_id = str(uuid.uuid4())
-        audio_path = os.path.join(AUDIO_DIR, f"{audio_id}.mp3")
+        audio_path = os.path.join(Config.AUDIO_DIR, f"{audio_id}.mp3")
         
         # Generate TTS
         audio_io.audio_io.speak(audio_path = audio_path, text = bot_response, language = language)
@@ -190,7 +192,7 @@ def play_audio(audio_id):
     if not audio_id or '..' in audio_id or '/' in audio_id:
         return jsonify({'error': 'Invalid audio ID'}), 400
     
-    audio_path = os.path.join(AUDIO_DIR, f"{audio_id}.mp3")
+    audio_path = os.path.join(Config.AUDIO_DIR, f"{audio_id}.mp3")
     
     if not os.path.exists(audio_path):
         return jsonify({'error': 'Audio file not found'}), 404
@@ -198,7 +200,7 @@ def play_audio(audio_id):
     # This would trigger your existing code:
     playsound(audio_path)
     
-    return send_from_directory(AUDIO_DIR, f"{audio_id}.mp3")
+    return send_from_directory(Config.AUDIO_DIR, f"{audio_id}.mp3")
 
 @app.route('/api/image_guess', methods=['POST'])
 def image_guess():
@@ -210,7 +212,7 @@ def image_guess():
     
     # Generate a unique filename
     input_audio_id = str(uuid.uuid4())
-    input_audio_path = os.path.join(AUDIO_DIR, f"{input_audio_id}.wav")  # Save as webm
+    input_audio_path = os.path.join(Config.AUDIO_DIR, f"{input_audio_id}.wav")  # Save as webm
     
     # Save the uploaded audio file
 
