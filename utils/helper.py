@@ -5,13 +5,9 @@ This module provides functions to help with the tidy operations of the main prog
 """
 
 import os
+from config import Config
 
-# Constants
-LOCAL_AUDIO_FILES = "audio"
-
-# Variables
-
-def cleanup(dir = LOCAL_AUDIO_FILES):
+def cleanup(dir = Config.AUDIO_DIR):
     try:
         # List all files in the directory
         files = os.listdir(dir)
@@ -24,10 +20,6 @@ def cleanup(dir = LOCAL_AUDIO_FILES):
             if os.path.isfile(file_path):
                 # Delete the file
                 os.remove(file_path)
-                print(f"Deleted: {file_path}")
-
-        print("All files deleted successfully.")
 
     except Exception as e:
-        print(f"An error occurred: {e}")
-    
+        print(f"File Cleanup Failed! Error {e}")
