@@ -38,7 +38,9 @@ class LanguageLearningApp:
     def __init__(self):
         """Initialize the Flask application and configure logging."""
         self.app = Flask(__name__)
+        self.language_model = None
         self.detector = None
+        self.transcription_model = None
         self._setup_logging()
         self._initialize_services()
         self._register_routes()
@@ -67,7 +69,29 @@ class LanguageLearningApp:
         
         # Initialize object detection model
         self._load_detector_model()
+        # Initialize language model
+        self._load_language_model()
+        # Initialize transcription model
+        self._load_transcription_model()
+
+    def _load_transcription_model(self) -> None:
+        """Load the language transcription model."""
+        try:
+            self.transcription_model = transcription_service.SpeechTranscriber()
+            self.logger.info(f"Successfully loaded transcription model.")
+        except Exception as e:
+            self.logger.error(f"Failed to load transcription model: {e}", exc_info=True)
+            self.transcription_model = None
     
+    def _load_language_model(self) -> None:
+        """Load the conversational language model."""
+        try:
+            self.language_model = llm_service.LanguageModel()
+            self.logger.info(f"Successfully loaded language model: {self.language_model.config.model_name}")
+        except Exception as e:
+            self.logger.error(f"Failed to load language model: {e}", exc_info=True)
+            self.language_model = None
+
     def _load_detector_model(self) -> None:
         """Load the zero-shot object detection model."""
         try:
@@ -425,7 +449,7 @@ class LanguageLearningApp:
         )
         
         # Generate bot response in English
-        bot_response_english = llm_service.bot_response(translated_user_text)
+        bot_response_english = self.language_model.generate_response(translated_user_text, use_history=False)
         
         # Translate bot response to target language
         bot_response = translation_service.translate_english_to_target(
@@ -472,9 +496,9 @@ class LanguageLearningApp:
         
         try:
             # Transcribe audio
-            transcribed_text = transcription_service.transcribe(
-                file=input_audio_path, 
-                tl=language
+            transcribed_text = self.transcription_model.transcribe_audio(
+                audio_file=input_audio_path, 
+                language=language
             )
             
             # Process as text conversation
@@ -514,9 +538,9 @@ class LanguageLearningApp:
         
         try:
             # Transcribe the guess
-            transcribed_text = transcription_service.transcribe(
-                file=input_audio_path, 
-                tl=language
+            transcribed_text = self.transcription_model.transcribe_audio(
+                audio_file=input_audio_path, 
+                language=language
             )
             
             # Translate to English for object detection
