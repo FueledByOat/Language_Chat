@@ -56,41 +56,49 @@ def chinese():
 def japanese():
     return render_template('japanese.html')
 
-@app.route('/chinese_image')
-def chinese_image():
-    # Load supporting libraries
+# -------------------------------------
+# Image Endpoint Consolidated
+# -------------------------------------
 
+@app.route('/<string:language>/image')
+def language_image_page(language):
+    if language not in ['chinese', 'japanese']:
+        return "Language not supported", 404 # Or render an error template
 
-    global detector 
-    detector = pipeline(model=Config.DETECTOR_CHECKPOINT, task="zero-shot-object-detection")
-    
-    bot_response = translation.translator.translate_english_to_target("What do you see?", language = "chinese")
-    audio_id = "chinese_image"
+    # Make sure DETECTOR is loaded (globally)
+    if not DETECTOR:
+         return "Object detection service is unavailable.", 503
+
+    bot_response = translation.translator.translate_english_to_target(
+        "What do you see?", language=language
+    )
+    # Consider if this audio needs to be unique per request or can be static
+    audio_id = f"{language}_image"
     audio_path = os.path.join(Config.AUDIO_DIR, f"{audio_id}.mp3")
-    audio_io.audio_io.speak(audio_path = audio_path, text = bot_response, language = "chinese")
 
-    r = requests.get("https://picsum.photos/400/400")
-    img_file = r.url
+    # Potentially cache this audio generation
+    if not os.path.exists(audio_path):
+         audio_io.audio_io.speak(audio_path=audio_path, text=bot_response, language=language)
 
-    return render_template('chinese_image.html', img_file = img_file)
+    try:
+        r = requests.get("https://picsum.photos/400/400", timeout=10) # e.g., 10 seconds
+        r.raise_for_status()
+        img_file = r.url
+    except requests.exceptions.Timeout:
+        app.logger.warning("Timeout fetching image from picsum.photos")
+        # Handle timeout, e.g., return a default image or error
+    except requests.exceptions.HTTPError as errh:
+        app.logger.error(f"Http Error: {errh}")
+        # Handle HTTP error
+    except requests.exceptions.RequestException as err:
+        app.logger.error(f"Request Error: {err}")
+        # Handle other request errors
 
-@app.route('/japanese_image')
-def japanese_image():
-    # Load supporting libraries
+    return render_template(f'{language}_image.html', img_file=img_file, language=language)
 
-
-    global detector 
-    detector = pipeline(model=Config.DETECTOR_CHECKPOINT, task="zero-shot-object-detection")
-    
-    bot_response = translation.translator.translate_english_to_target("What do you see?", language = "japanese")
-    audio_id = "japanese_image"
-    audio_path = os.path.join(Config.AUDIO_DIR, f"{audio_id}.mp3")
-    audio_io.audio_io.speak(audio_path = audio_path, text = bot_response, language = "japanese")
-
-    r = requests.get("https://picsum.photos/400/400")
-    img_file = r.url
-
-    return render_template('japanese_image.html', img_file = img_file)
+# -------------------------------------
+# API Endpoints
+# -------------------------------------
 
 # API endpoint for text chat
 @app.route('/api/text-chat', methods=['POST'])
@@ -102,16 +110,10 @@ def text_chat():
     translated_user_text = translation.translator.translate_target_to_english(user_message, language = language)
     bot_response_english = language_model.language_model.bot_response(translated_user_text)
     bot_response = translation.translator.translate_english_to_target(bot_response_english, language = language)
-        
-    # Placeholder responses for now
-    if language == 'chinese':
-        translated_user_text = f"[English translation: {translated_user_text}]"
-        bot_response = bot_response
-        bot_response_english = bot_response_english
-    else:  # japanese
-        translated_user_text = f"[English translation: {translated_user_text}]"
-        bot_response = bot_response
-        bot_response_english = bot_response_english
+
+    translated_user_text = f"[English translation: {translated_user_text}]"
+    bot_response = bot_response
+    bot_response_english = bot_response_english
     
     # Generate speech and save audio file
     audio_id = str(uuid.uuid4())
@@ -152,17 +154,10 @@ def voice_chat():
         bot_response_english = language_model.language_model.bot_response(translated_user_text)
         bot_response = translation.translator.translate_english_to_target(bot_response_english, language = language)
         
-        # Placeholder responses for now
-        if language == 'chinese':
-            transcribed_text = transcribed_text
-            translated_user_text = f"[English translation: {translated_user_text}]"
-            bot_response = bot_response
-            bot_response_english = bot_response_english
-        else:  # japanese
-            transcribed_text = transcribed_text
-            translated_user_text = f"[English translation: {translated_user_text}]"
-            bot_response = bot_response
-            bot_response_english = bot_response_english
+        transcribed_text = transcribed_text
+        translated_user_text = f"[English translation: {translated_user_text}]"
+        bot_response = bot_response
+        bot_response_english = bot_response_english
         
         # Generate speech and save audio file
         audio_id = str(uuid.uuid4())
@@ -212,7 +207,7 @@ def image_guess():
     
     # Generate a unique filename
     input_audio_id = str(uuid.uuid4())
-    input_audio_path = os.path.join(Config.AUDIO_DIR, f"{input_audio_id}.wav")  # Save as webm
+    input_audio_path = os.path.join(Config.AUDIO_DIR, f"{input_audio_id}.wav")
     
     # Save the uploaded audio file
 
@@ -235,10 +230,10 @@ def image_guess():
         translated_user_text = translation.translator.translate_target_to_english(transcribed_text, language = language)
         guesses = [translated_user_text]
 
-        predictions = detector(
+        predictions = DETECTOR(
             img,
             candidate_labels=guesses)
-        predictions = [pic for pic in predictions if pic['score'] > 0.15]
+        predictions = [pic for pic in predictions if pic['score'] > Config.IMAGE_SCORE_THRESHOLD]
     
         draw = ImageDraw.Draw(img)
         for prediction in predictions:

@@ -12,6 +12,7 @@ class Config:
     LANGUAGE_MODEL_NAME = "microsoft/DialoGPT-medium"
     CACHE_TTL = int(os.getenv('CACHE_TTL', '300'))
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
+    IMAGE_SCORE_THRESHOLD = 0.15
     # Huggingface token
     HF_TOKEN = os.getenv('HF_TOKEN', "broken_hf_key")
     
