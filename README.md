@@ -60,6 +60,16 @@ python app.py
 - Improve AI-generated responses using fine-tuned **DialoGPT** or a different language model
 - Enhance UI with real-time speech visualization of Pinyin
 
+| Component         | Current Implementation       | Recommendation               | Benefit                                                                 |
+|-------------------|-------------------------------|------------------------------|-------------------------------------------------------------------------|
+| Framework         | Flask (Synchronous)           | FastAPI (Asynchronous)       | Non-blocking I/O, much faster for chat.                                 |
+| Chat API          | HTTP Request/Response         | WebSockets                   | Real-time, interactive chat; server can push updates.                  |
+| Chat Logic        | "Translation Sandwich"        | Direct Multilingual LLM (e.g., Llama 3) | Eliminates 2 pipeline steps. Faster, more accurate.                   |
+| Transcription     | Vosk                          | OpenAI's Whisper             | State-of-the-art accuracy for Japanese/Mandarin.                       |
+| Image Model       | Zero-Shot Object Detector      | Multimodal (VQA) Model (e.g., LLaVA) | Integrates vision and chat into a single, more capable model.         |
+| Audio Output      | playsound() on server         | Client-side Audio Player     | Fixes critical bug. Correctly plays audio for the user.                |
+
+
 ## 🤝 Contributing  
 1. Fork the repo  
 2. Create a new branch (`git checkout -b feature/new-feature`)  
