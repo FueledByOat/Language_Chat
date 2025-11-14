@@ -286,12 +286,7 @@ class LanguageLearningApp:
             if not os.path.exists(audio_path):
                 return jsonify({"error": "Audio file not found"}), 404
 
-            # Play audio locally (consider removing in production)
-            try:
-                playsound(audio_path)
-            except Exception as e:
-                self.logger.warning(f"Failed to play audio locally: {e}")
-
+            # The route's only job is to send the file.
             return send_from_directory(Config.AUDIO_DIR, f"{audio_id}.mp3")
 
         except Exception as e:
@@ -464,11 +459,6 @@ class LanguageLearningApp:
             audio_service.speak(
                 audio_path=audio_path, text=bot_response, language=language
             )
-
-            # REMINDER: You should remove this 'playsound' call.
-            # It plays on the server and blocks the request.
-            # The client should fetch /api/audio/<audio_id> to play it.
-            playsound(audio_path)
 
         except Exception as e:
             self.logger.error(f"Failed to generate or play audio: {e}")
@@ -674,7 +664,7 @@ def create_app() -> Flask:
 if __name__ == "__main__":
     try:
         app_instance = LanguageLearningApp()
-        app_instance.run(debug=True, port=5170)
+        app_instance.run(debug=True, port=5170, host="0.0.0.0")
     except Exception as e:
         logging.error(f"Failed to start application: {e}", exc_info=True)
         raise

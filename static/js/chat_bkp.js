@@ -140,20 +140,15 @@ document.addEventListener('DOMContentLoaded', function() {
     
 // Function to handle voice recording
 async function toggleRecording() {
+    // Audio configuration for WAV
     const sampleRate = 44100;
-    const numChannels = 1;
+    const numChannels = 1; // Mono
     
     if (!isRecording) {
+        // Start recording
         audioChunks = [];
         
         try {
-            // CRITICAL: Check for HTTPS (except localhost)
-            if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-                alert('录音功能需要HTTPS连接。请使用HTTPS访问此网站。');
-                return;
-            }
-            
-            // Request microphone access
             const stream = await navigator.mediaDevices.getUserMedia({ 
                 audio: { 
                     sampleRate: sampleRate,
@@ -163,137 +158,107 @@ async function toggleRecording() {
                 } 
             });
             
-            // Detect supported MIME type for iOS Safari
-            let mimeType = 'audio/webm';
-            if (MediaRecorder.isTypeSupported('audio/mp4')) {
-                mimeType = 'audio/mp4'; // iOS Safari prefers this
-            } else if (!MediaRecorder.isTypeSupported('audio/webm')) {
-                mimeType = ''; // Let browser choose default
-            }
-            
-            mediaRecorder = new MediaRecorder(stream, 
-                mimeType ? { mimeType, audioBitsPerSecond: 128000 } : {}
-            );
+            // Using standard MediaRecorder with audio/wav MIME type
+            mediaRecorder = new MediaRecorder(stream, { 
+                mimeType: 'audio/webm', // Use webm for recording (will convert to WAV later)
+                audioBitsPerSecond: 16 * sampleRate // 16-bit PCM
+            });
             
             mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0) {
-                    audioChunks.push(event.data);
-                }
+                audioChunks.push(event.data);
             };
             
             mediaRecorder.onstop = async () => {
+                // Show loading state
                 recordingStatus.textContent = "处理中...";
                 
-                // Get the recorded audio blob
-                const audioBlob = new Blob(audioChunks, { type: mimeType || 'audio/webm' });
+                // Convert to WAV format
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                
+                // Convert webm to WAV using a helper function
+                const wavBlob = await convertToWav(audioBlob, sampleRate, numChannels);
+                
+                // Create form data
+                const formData = new FormData();
+                formData.append('audio', wavBlob, 'recording.wav');
+                formData.append('language', window.location.pathname.includes('chinese') ? 'chinese' : 'japanese');
                 
                 try {
-                    // Convert to WAV
-                    const wavBlob = await convertToWav(audioBlob, sampleRate, numChannels);
-                    
-                    // Create form data
-                    const formData = new FormData();
-                    formData.append('audio', wavBlob, 'recording.wav');
-                    formData.append('language', window.location.pathname.includes('chinese') ? 'chinese' : 'japanese');
-                    
-                    // Send to backend
+                    // Send audio to backend
                     const response = await fetch('/api/voice-chat', {
                         method: 'POST',
                         body: formData
                     });
                     
                     if (!response.ok) {
-                        throw new Error('Server error: ' + response.status);
+                        throw new Error('Network response was not ok');
                     }
                     
                     const data = await response.json();
                     
+                    // Add user message to chat
                     addUserMessage(data.transcribedText, data.translatedUserText);
+                    
+                    // Add bot response to chat
                     addBotMessage(data.botResponse, data.botResponseEnglish, data.audioId);
                     
                     if (data.audioId) {
                         playAudio(data.audioId);
                     }
-                    
+
+                    // Reset status
                     recordingStatus.textContent = "准备就绪";
                     
                 } catch (error) {
-                    console.error('Processing error:', error);
-                    recordingStatus.textContent = "处理失败，请重试";
+                    console.error('Error:', error);
+                    recordingStatus.textContent = "发生错误，请重试";
                 }
             };
             
-            mediaRecorder.onerror = (event) => {
-                console.error('MediaRecorder error:', event.error);
-                recordingStatus.textContent = "录音错误";
-                isRecording = false;
-                recordButton.classList.remove('recording');
-                recordButton.querySelector('.button-text').textContent = "按下开始录音";
-            };
-            
-            mediaRecorder.start(1000);
+            mediaRecorder.start(1000); // Collect data in 1-second chunks
             isRecording = true;
             
+            // Update UI
             recordButton.classList.add('recording');
             recordButton.querySelector('.button-text').textContent = "点击停止录音";
             recordingStatus.textContent = "正在录音...";
             
         } catch (error) {
-            console.error('Microphone access error:', error);
-            
-            // Specific error messages for iOS Safari
-            let errorMessage = '无法访问麦克风。';
-            
-            if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-                errorMessage = '麦克风权限被拒绝。请在设置中允许此网站访问麦克风。\n\niPhone用户：设置 > Safari > 麦克风';
-            } else if (error.name === 'NotFoundError') {
-                errorMessage = '未找到麦克风设备。';
-            } else if (error.name === 'NotReadableError') {
-                errorMessage = '麦克风正被其他应用使用。';
-            } else if (error.name === 'SecurityError') {
-                errorMessage = '安全错误：请使用HTTPS连接。';
-            }
-            
-            alert(errorMessage);
-            recordingStatus.textContent = "准备就绪";
+            console.error('Error accessing microphone:', error);
+            alert('无法访问麦克风。请确保您已授予麦克风权限。');
         }
         
     } else {
         // Stop recording
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-            mediaRecorder.stop();
-            isRecording = false;
-            
-            // Stop all tracks
-            mediaRecorder.stream.getTracks().forEach(track => track.stop());
-            
-            recordButton.classList.remove('recording');
-            recordButton.querySelector('.button-text').textContent = "按下开始录音";
-            recordingStatus.textContent = "正在处理...";
-        }
+        mediaRecorder.stop();
+        isRecording = false;
+        
+        // Stop all tracks in the stream
+        mediaRecorder.stream.getTracks().forEach(track => track.stop());
+        
+        // Update UI
+        recordButton.classList.remove('recording');
+        recordButton.querySelector('.button-text').textContent = "按下开始录音";
+        recordingStatus.textContent = "正在处理...";
     }
 }
 
 // Helper function to convert audio blob to WAV format
 async function convertToWav(audioBlob, sampleRate, numChannels) {
-    try {
-        // iOS Safari uses webkitAudioContext
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        const audioContext = new AudioContextClass({ sampleRate });
-        
-        const arrayBuffer = await audioBlob.arrayBuffer();
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        
-        const wavBuffer = createWavFile(audioBuffer, numChannels);
-        
-        // Close context to free resources
-        audioContext.close();
-        
-        return new Blob([wavBuffer], { type: 'audio/wav' });
-    } catch (error) {
-        console.error('WAV conversion error:', error);
-        throw new Error('音频转换失败');
-    }
+    // Create an audio context
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
+    
+    // Convert the blob to array buffer
+    const arrayBuffer = await audioBlob.arrayBuffer();
+    
+    // Decode the audio data
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+    
+    // Create WAV file
+    const wavBuffer = createWavFile(audioBuffer, numChannels);
+    
+    // Return as Blob
+    return new Blob([wavBuffer], { type: 'audio/wav' });
 }
 
 // Function to create WAV file from audio buffer
