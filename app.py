@@ -31,6 +31,7 @@ from playsound3 import playsound
 # Local imports
 import audio_io.audio_io as audio_service
 import language_model.multilingual_model as llm_service
+
 import translation.translator as translation_service
 import translation.whisper_transcribe_claude as transcription_service
 import utils.helper as utils
@@ -89,17 +90,6 @@ class LanguageLearningApp:
         except Exception as e:
             self.logger.error(f"Failed to load transcription model: {e}", exc_info=True)
             self.transcription_model = None
-
-    def _load_language_model_old(self) -> None:
-        """Load the conversational language model."""
-        try:
-            self.language_model = llm_service.LanguageModel()
-            self.logger.info(
-                f"Successfully loaded language model: {self.language_model.config.model_name}"
-            )
-        except Exception as e:
-            self.logger.error(f"Failed to load language model: {e}", exc_info=True)
-            self.language_model = None
 
     def _load_language_model(self) -> None:
         """Load the conversational language model."""
@@ -426,56 +416,6 @@ class LanguageLearningApp:
         audio_path = os.path.join(Config.AUDIO_DIR, f"{audio_id}.wav")
         audio_file.save(audio_path)
         return audio_path
-
-    def _process_text_conversation_old(
-        self, user_message: str, language: str
-    ) -> Dict[str, Any]:
-        """
-        Process a text-based conversation.
-
-        Args:
-            user_message: User's message in target language
-            language: Target language code
-
-        Returns:
-            Dictionary with conversation results
-        """
-        # Translate user message to English
-        translated_user_text = translation_service.Translator().translate_to_english(
-            user_message, language
-        )
-
-        # Generate bot response in English
-        bot_response_english = self.language_model.generate_response(
-            translated_user_text, use_history=False
-        )
-
-        # Translate bot response to target language
-        bot_response = translation_service.Translator().translate_from_english(
-            bot_response_english, language
-        )
-
-        # Generate audio for bot response
-        audio_id = str(uuid.uuid4())
-        audio_path = os.path.join(Config.AUDIO_DIR, f"{audio_id}.mp3")
-
-        try:
-            audio_service.speak(
-                audio_path=audio_path, text=bot_response, language=language
-            )
-
-            # Play audio locally (consider removing in production)
-            playsound(audio_path)
-
-        except Exception as e:
-            self.logger.error(f"Failed to generate or play audio: {e}")
-
-        return {
-            "translatedUserText": f"[English translation: {translated_user_text}]",
-            "botResponse": bot_response,
-            "botResponseEnglish": bot_response_english,
-            "audioId": audio_id,
-        }
 
     def _process_text_conversation(
         self, user_message: str, language: str
