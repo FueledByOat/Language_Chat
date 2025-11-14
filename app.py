@@ -30,9 +30,9 @@ from playsound3 import playsound
 
 # Local imports
 import audio_io.audio_io as audio_service
-import language_model.language_model as llm_service
+import language_model.multilingual_model as llm_service
 import translation.translator as translation_service
-import translation.whisper_transcribe as transcription_service
+import translation.whisper_transcribe_claude as transcription_service
 import utils.helper as utils
 from config import Config
 
@@ -90,12 +90,23 @@ class LanguageLearningApp:
             self.logger.error(f"Failed to load transcription model: {e}", exc_info=True)
             self.transcription_model = None
 
-    def _load_language_model(self) -> None:
+    def _load_language_model_old(self) -> None:
         """Load the conversational language model."""
         try:
             self.language_model = llm_service.LanguageModel()
             self.logger.info(
                 f"Successfully loaded language model: {self.language_model.config.model_name}"
+            )
+        except Exception as e:
+            self.logger.error(f"Failed to load language model: {e}", exc_info=True)
+            self.language_model = None
+
+    def _load_language_model(self) -> None:
+        """Load the conversational language model."""
+        try:
+            self.language_model = llm_service.MultilingualModel()
+            self.logger.info(
+                f"Successfully loaded language model: {self.language_model.model_id}"
             )
         except Exception as e:
             self.logger.error(f"Failed to load language model: {e}", exc_info=True)
@@ -416,7 +427,7 @@ class LanguageLearningApp:
         audio_file.save(audio_path)
         return audio_path
 
-    def _process_text_conversation(
+    def _process_text_conversation_old(
         self, user_message: str, language: str
     ) -> Dict[str, Any]:
         """
@@ -459,6 +470,70 @@ class LanguageLearningApp:
         except Exception as e:
             self.logger.error(f"Failed to generate or play audio: {e}")
 
+        return {
+            "translatedUserText": f"[English translation: {translated_user_text}]",
+            "botResponse": bot_response,
+            "botResponseEnglish": bot_response_english,
+            "audioId": audio_id,
+        }
+
+    def _process_text_conversation(
+        self, user_message: str, language: str
+    ) -> Dict[str, Any]:
+        """
+        Process a text-based conversation using the direct multilingual model.
+
+        Args:
+            user_message: User's message in target language
+            language: Target language code
+
+        Returns:
+            Dictionary with conversation results
+        """
+        # --- NEW PIPELINE ---
+
+        # 1. Generate bot response DIRECTLY in the target language
+        #    This is now the *only* model call on the critical path.
+        bot_response = self.language_model.generate_response(
+            user_message, language, use_history=False
+        )
+
+        if not bot_response:
+            bot_response = "Sorry, I had trouble generating a response."
+            bot_response_english = "Sorry, I had trouble generating a response."
+            translated_user_text = "(Translation failed)"
+        else:
+            # 2. Get translations for the UI (no longer needed for the bot)
+            #    These are now just for display.
+            translated_user_text = (
+                translation_service.Translator().translate_to_english(
+                    user_message, language
+                )
+            )
+            bot_response_english = (
+                translation_service.Translator().translate_to_english(
+                    bot_response, language
+                )
+            )
+
+        # 3. Generate audio for bot response (this logic is unchanged)
+        audio_id = str(uuid.uuid4())
+        audio_path = os.path.join(Config.AUDIO_DIR, f"{audio_id}.mp3")
+
+        try:
+            audio_service.speak(
+                audio_path=audio_path, text=bot_response, language=language
+            )
+
+            # REMINDER: You should remove this 'playsound' call.
+            # It plays on the server and blocks the request.
+            # The client should fetch /api/audio/<audio_id> to play it.
+            playsound(audio_path)
+
+        except Exception as e:
+            self.logger.error(f"Failed to generate or play audio: {e}")
+
+        # 4. Return the same data structure as before
         return {
             "translatedUserText": f"[English translation: {translated_user_text}]",
             "botResponse": bot_response,
