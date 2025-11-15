@@ -2,37 +2,45 @@
 <html lang="ja">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>日本語対話アシスタント | Japanese Chat Assistant</title>
-    <link rel="stylesheet" href="../static/css/styles.css">
+    <link rel="stylesheet" href="/static/css/styles.css">
 </head>
 <body>
     <div class="container">
-        <div class="chat-container">
+        <header>
+            <h1>語学学習アシスタント</h1>
+            <a href="{{ url_for('home') }}" class="home-link">
+                <span>← ホームに戻る</span>
+            </a>
+        </header>
+        
+        <div class="chat-container japanese-theme">
             <div class="chat-header japanese">
                 <div class="icon japanese">日</div>
                 <h2>日本語対話アシスタント</h2>
             </div>
             
             <div class="chat-messages" id="chatMessages">
-                <div class="message bot-message">こんにちは！私は日本語対話アシスタントです。下のマイクボタンをクリックして会話を始めてください。</div>
-                <!-- Chat messages will be added here dynamically -->
+                <div class="message bot-message">
+                    こんにちは！私は日本語対話アシスタントです。下のマイクボタンをクリックして会話を始めてください。
+                </div>
             </div>
             
-            <div class="voice-input-container">
-                <button id="recordButton" class="record-button">
-                    <span class="mic-icon">🎤</span>
-                    <span class="button-text">クリックして録音開始</span>
-                </button>
-                <div class="recording-status" id="recordingStatus">準備ができて</div>
+            <div class="input-area">
+                <div class="voice-input-container">
+                    <button id="recordButton" class="record-button">
+                        <span class="mic-icon">🎤</span>
+                        <span class="button-text">クリックして録音開始</span>
+                    </button>
+                    <div class="recording-status" id="recordingStatus">準備ができて</div>
+                </div>
+                
+                <div class="chat-input-container">
+                    <input type="text" class="chat-input" id="userInput" placeholder="またはここにテキストを入力..." autocomplete="off">
+                    <button class="send-button" id="sendButton">送信</button>
+                </div>
             </div>
-            
-            <div class="chat-input-container">
-                <input type="text" class="chat-input" id="userInput" placeholder="またはここにテキストを入力..." autocomplete="off">
-                <button class="send-button" id="sendButton">手紙を送る</button>
-            </div>
-            
-            <a href="{{ url_for('home') }}" class="back-link">← ホームに戻る</a>
         </div>
         
         <footer>
@@ -40,6 +48,6 @@
         </footer>
     </div>
     
-    <script src="../static/js/chat.js"></script>
+    <script src="/static/js/chat.js"></script>
 </body>
 </html>

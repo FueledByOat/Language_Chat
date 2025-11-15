@@ -1,47 +1,54 @@
 <!DOCTYPE html>
 <html lang="ja">
-
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>日本の画像当てクイズ | Japanese Image Guesser</title>
-    <link rel="stylesheet" href="../static/css/styles.css">
+    <link rel="stylesheet" href="/static/css/styles.css">
 </head>
-
 <body>
     <div class="container">
-        <div class="chat-container">
+        <header>
+            <h1>語学学習アシスタント</h1>
+            <a href="{{ url_for('home') }}" class="home-link">
+                <span>← ホームに戻る</span>
+            </a>
+        </header>
+        
+        <div class="chat-container japanese-theme">
             <div class="chat-header japanese">
-                <div class="icon japanese">中</div>
+                <div class="icon japanese">日</div>
                 <h2>日本の画像当てクイズ</h2>
             </div>
-
-            <div class="chat-header japanese">
-                <h3>何が見えますか?</h3>
+            
+            <div class="image-game-content">
+                <div class="game-prompt">
+                    <h3>何が見えますか?</h3>
+                </div>
+                
+                {% if img_file %}
+                <div class="image-container">
+                    <img id="dynamic-image" src="{{ img_file }}" alt="Random Image" class="game-image">
+                </div>
+                {% endif %}
+                
+                <div class="input-area">
+                    <div class="voice-input-container">
+                        <button id="recordButton" class="record-button">
+                            <span class="mic-icon">🎤</span>
+                            <span class="button-text">クリックして録音開始</span>
+                        </button>
+                        <div class="recording-status" id="recordingStatus">準備ができて</div>
+                    </div>
+                </div>
             </div>
-            {% if img_file %}
-            <div>
-                <img id='dynamic-image' src="{{ img_file }}" alt="Random Image"
-                    class="medium-image">
-            </div>
-            {% endif %}
-            <div class="voice-input-container">
-                <button id="recordButton" class="record-button">
-                    <span class="mic-icon">🎤</span>
-                    <span class="button-text">クリックして録音開始</span>
-                </button>
-                <div class="recording-status" id="recordingStatus">准备就绪</div>
-            </div>
-
-            <a href="{{ url_for('home') }}" class="back-link">← ホームに戻る</a>
         </div>
-
+        
         <footer>
             <p>Powered by Python NLP</p>
         </footer>
     </div>
-
-    <script src="../static/js/image.js"></script>
+    
+    <script src="/static/js/image.js"></script>
 </body>
-
 </html>

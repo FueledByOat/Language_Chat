@@ -1,39 +1,22 @@
 document.addEventListener('DOMContentLoaded', function () {
-    const chatMessages = document.getElementById('chatMessages');
-    const userInput = document.getElementById('userInput');
-    const sendButton = document.getElementById('sendButton');
     const recordButton = document.getElementById('recordButton');
     const recordingStatus = document.getElementById('recordingStatus');
     const language = window.location.pathname.includes('chinese') ? 'chinese' : 'japanese';
-    const url = document.getElementById('dynamic-image').src;
+    const dynamicImage = document.getElementById('dynamic-image');
+    
+    if (!dynamicImage) {
+        console.error('Dynamic image element not found');
+        return;
+    }
+    
+    const url = dynamicImage.src;
 
     let mediaRecorder;
     let audioChunks = [];
     let isRecording = false;
 
     // Ask the user what they see by playing the sound
-    playAudio(language + "_image")
-
-    // Function to add a user message to the chat
-    function addUserMessage(originalText, translatedText) {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'message user-message';
-
-        // Add original text
-        messageDiv.textContent = originalText;
-
-        // Add translation if available
-        if (translatedText) {
-            const translationDiv = document.createElement('div');
-            translationDiv.className = 'translation';
-            translationDiv.textContent = translatedText;
-            messageDiv.appendChild(translationDiv);
-        }
-
-        chatMessages.appendChild(messageDiv);
-        scrollToBottom();
-    }
-
+    playAudio(language + "_image");
 
     // Function to play audio
     function playAudio(audioId) {
@@ -45,16 +28,13 @@ document.addEventListener('DOMContentLoaded', function () {
             })
             .catch(error => {
                 console.error('Error playing audio:', error);
-                alert('Error playing audio. Please try again.');
             });
     }
 
-
     // Function to handle voice recording
     async function toggleRecording() {
-        // Audio configuration for WAV
         const sampleRate = 44100;
-        const numChannels = 1; // Mono
+        const numChannels = 1;
 
         if (!isRecording) {
             // Start recording
@@ -70,10 +50,9 @@ document.addEventListener('DOMContentLoaded', function () {
                     }
                 });
 
-                // Using standard MediaRecorder with audio/wav MIME type
                 mediaRecorder = new MediaRecorder(stream, {
-                    mimeType: 'audio/webm', // Use webm for recording (will convert to WAV later)
-                    audioBitsPerSecond: 16 * sampleRate // 16-bit PCM
+                    mimeType: 'audio/webm',
+                    audioBitsPerSecond: 16 * sampleRate
                 });
 
                 mediaRecorder.ondataavailable = (event) => {
@@ -82,18 +61,17 @@ document.addEventListener('DOMContentLoaded', function () {
 
                 mediaRecorder.onstop = async () => {
                     // Show loading state
-                    recordingStatus.textContent = "处理中...";
+                    const statusText = language === 'chinese' ? '处理中...' : '処理中...';
+                    recordingStatus.textContent = statusText;
 
                     // Convert to WAV format
                     const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-
-                    // Convert webm to WAV using a helper function
                     const wavBlob = await convertToWav(audioBlob, sampleRate, numChannels);
 
                     // Create form data
                     const formData = new FormData();
                     formData.append('audio', wavBlob, 'recording.wav');
-                    formData.append('language', window.location.pathname.includes('chinese') ? 'chinese' : 'japanese');
+                    formData.append('language', language);
                     formData.append('image_url', url);
 
                     try {
@@ -109,28 +87,37 @@ document.addEventListener('DOMContentLoaded', function () {
 
                         const data = await response.json();
 
+                        // Update image
                         const imgElement = document.getElementById('dynamic-image');
                         imgElement.src = `data:image/jpeg;base64,${data.image}`;
+                        
                         // Reset status
-                        recordingStatus.textContent = "准备就绪";
+                        const readyText = language === 'chinese' ? '准备就绪' : '準備ができて';
+                        recordingStatus.textContent = readyText;
 
                     } catch (error) {
                         console.error('Error:', error);
-                        recordingStatus.textContent = "发生错误，请重试";
+                        const errorText = language === 'chinese' ? '发生错误，请重试' : 'エラーが発生しました';
+                        recordingStatus.textContent = errorText;
                     }
                 };
 
-                mediaRecorder.start(1000); // Collect data in 1-second chunks
+                mediaRecorder.start(1000);
                 isRecording = true;
 
                 // Update UI
                 recordButton.classList.add('recording');
-                recordButton.querySelector('.button-text').textContent = "点击停止录音";
-                recordingStatus.textContent = "正在录音...";
+                const stopText = language === 'chinese' ? '点击停止录音' : '録音を停止';
+                recordButton.querySelector('.button-text').textContent = stopText;
+                const recordingText = language === 'chinese' ? '正在录音...' : '録音中...';
+                recordingStatus.textContent = recordingText;
 
             } catch (error) {
                 console.error('Error accessing microphone:', error);
-                alert('无法访问麦克风。请确保您已授予麦克风权限。');
+                const micErrorText = language === 'chinese' 
+                    ? '无法访问麦克风。请确保您已授予麦克风权限。'
+                    : 'マイクにアクセスできません。マイクの権限を確認してください。';
+                alert(micErrorText);
             }
 
         } else {
@@ -138,31 +125,24 @@ document.addEventListener('DOMContentLoaded', function () {
             mediaRecorder.stop();
             isRecording = false;
 
-            // Stop all tracks in the stream
+            // Stop all tracks
             mediaRecorder.stream.getTracks().forEach(track => track.stop());
 
             // Update UI
             recordButton.classList.remove('recording');
-            recordButton.querySelector('.button-text').textContent = "按下开始录音";
-            recordingStatus.textContent = "正在处理...";
+            const startText = language === 'chinese' ? '按下开始录音' : 'クリックして録音開始';
+            recordButton.querySelector('.button-text').textContent = startText;
+            const processingText = language === 'chinese' ? '正在处理...' : '処理中...';
+            recordingStatus.textContent = processingText;
         }
     }
 
     // Helper function to convert audio blob to WAV format
     async function convertToWav(audioBlob, sampleRate, numChannels) {
-        // Create an audio context
         const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
-
-        // Convert the blob to array buffer
         const arrayBuffer = await audioBlob.arrayBuffer();
-
-        // Decode the audio data
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-
-        // Create WAV file
         const wavBuffer = createWavFile(audioBuffer, numChannels);
-
-        // Return as Blob
         return new Blob([wavBuffer], { type: 'audio/wav' });
     }
 
@@ -176,36 +156,29 @@ document.addEventListener('DOMContentLoaded', function () {
         const byteRate = sampleRate * blockAlign;
         const dataSize = length * blockAlign;
 
-        // WAV header is 44 bytes
         const buffer = new ArrayBuffer(44 + dataSize);
         const view = new DataView(buffer);
 
         // Write WAV header
-        // "RIFF" chunk descriptor
         writeString(view, 0, 'RIFF');
         view.setUint32(4, 36 + dataSize, true);
         writeString(view, 8, 'WAVE');
-
-        // "fmt " sub-chunk
         writeString(view, 12, 'fmt ');
-        view.setUint32(16, 16, true); // subchunk1 size (16 for PCM)
-        view.setUint16(20, 1, true); // PCM format
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);
         view.setUint16(22, numChannels, true);
         view.setUint32(24, sampleRate, true);
         view.setUint32(28, byteRate, true);
         view.setUint16(32, blockAlign, true);
         view.setUint16(34, bitsPerSample, true);
-
-        // "data" sub-chunk
         writeString(view, 36, 'data');
         view.setUint32(40, dataSize, true);
 
         // Write audio data
-        const floatData = audioBuffer.getChannelData(0); // Get mono channel
+        const floatData = audioBuffer.getChannelData(0);
         let offset = 44;
 
         for (let i = 0; i < length; i++) {
-            // Convert float to 16-bit PCM
             const sample = Math.max(-1, Math.min(1, floatData[i]));
             const pcm = sample < 0 ? sample * 32768 : sample * 32767;
             view.setInt16(offset, pcm, true);
@@ -214,6 +187,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
         return buffer;
     }
+
     // Helper function to write strings to DataView
     function writeString(view, offset, string) {
         for (let i = 0; i < string.length; i++) {
@@ -222,15 +196,9 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     // Event listener for record button
-    recordButton.addEventListener('click', toggleRecording);
-
-    // Event listener for send button
-    sendButton.addEventListener('click', sendTextMessage);
-
-    // Event listener for Enter key in text input
-    userInput.addEventListener('keypress', function (e) {
-        if (e.key === 'Enter') {
-            sendTextMessage();
-        }
-    });
+    if (recordButton) {
+        recordButton.addEventListener('click', toggleRecording);
+    } else {
+        console.error('Record button not found');
+    }
 });
