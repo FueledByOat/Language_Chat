@@ -2,87 +2,113 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Scenario Practice - {{ language|title }}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="icon" type="image/png" href="/static/favicon/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/static/favicon/favicon.svg" />
+    <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon/apple-touch-icon.png" />
 </head>
-<body class="bg-gray-100 min-h-screen flex flex-col items-center p-4">
+<body>
+    <div class="container">
+        <header>
+            <h1>{{ language|title }} Scenario Practice</h1>
+            <a href="{{ url_for('home') }}" class="home-link">
+                <span>← Back to Home</span>
+            </a>
+        </header>
 
-    <div class="w-full max-w-md mb-6 flex justify-between items-center">
-        <a href="/{{ language }}" class="text-blue-600 hover:text-blue-800">
-            <i class="fas fa-arrow-left"></i> Back
-        </a>
-        <h1 class="text-2xl font-bold text-gray-800">{{ language|title }} Scenarios</h1>
-    </div>
+        <div class="chat-container">
+            <div class="chat-header">
+                <div class="icon">{{ language[0]|upper }}</div>
+                <div class="header-controls">
+                    <select id="scenarioSelect" class="scenario-dropdown">
+                        {% for key, info in scenarios.items() %}
+                        <option value="{{ key }}">{{ info.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <button id="resetButton" class="icon-button" title="Reset Conversation">↻</button>
+                </div>
+            </div>
+            
+            <div id="scenarioDesc" class="scenario-context-banner"></div>
 
-    <div class="w-full max-w-md bg-white rounded-xl shadow-md p-6 mb-6">
-        <label class="block text-gray-700 text-sm font-bold mb-2">Choose a Scenario:</label>
-        <select id="scenarioSelect" class="w-full p-3 border rounded-lg bg-gray-50 mb-4">
-            {% for key, info in scenarios.items() %}
-            <option value="{{ key }}">{{ info.name }}</option>
-            {% endfor %}
-        </select>
-        <p id="scenarioDesc" class="text-gray-600 italic text-sm mb-4">
-            </p>
-        <button onclick="resetScenario()" class="text-xs text-red-500 underline">Reset Conversation</button>
-    </div>
+            <div class="chat-messages" id="chatMessages">
+                <div class="message bot-message">
+                    Select a scenario above and say hello to start!
+                </div>
+            </div>
 
-    <div class="w-full max-w-md bg-white rounded-xl shadow-md overflow-hidden flex flex-col h-[500px]">
-        
-        <div id="chatContainer" class="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
-            <div class="text-center text-gray-400 text-sm mt-4">
-                Select a scenario and start speaking!
+            <div class="input-area">
+                <div class="voice-input-container">
+                    <button id="recordButton" class="record-button">
+                        <span class="mic-icon">🎤</span>
+                        <span class="button-text">Hold to Speak</span>
+                    </button>
+                    <div class="recording-status" id="recordingStatus">Ready</div>
+                </div>
+
+                <div class="chat-input-container">
+                    <input type="text" class="chat-input" id="userInput" placeholder="Type your response here..." autocomplete="off">
+                    <button class="send-button" id="sendButton">Send</button>
+                </div>
             </div>
         </div>
 
-        <div class="p-4 bg-white border-t border-gray-200 flex justify-center items-center space-x-4">
-            <button id="recordBtn" class="w-16 h-16 rounded-full bg-blue-600 hover:bg-blue-700 text-white flex items-center justify-center shadow-lg transition-all transform hover:scale-105 focus:outline-none">
-                <i class="fas fa-microphone text-2xl"></i>
-            </button>
-            <div id="status" class="text-sm text-gray-500 font-medium hidden">Thinking...</div>
-        </div>
+        <footer>
+            <p>Powered by Python NLP</p>
+        </footer>
     </div>
 
     <audio id="audioPlayer" class="hidden"></audio>
 
     <script>
-        // Generate a random Session ID for this page load
         const sessionId = crypto.randomUUID();
         const language = "{{ language }}";
-        
-        // Scenarios Data injected from Python
         const scenariosData = {{ scenarios | tojson }};
-        
-        const recordBtn = document.getElementById('recordBtn');
-        const statusDiv = document.getElementById('status');
-        const chatContainer = document.getElementById('chatContainer');
+
+        // DOM Elements
+        const recordButton = document.getElementById('recordButton');
+        const recordingStatus = document.getElementById('recordingStatus');
+        const chatMessages = document.getElementById('chatMessages');
         const scenarioSelect = document.getElementById('scenarioSelect');
         const scenarioDesc = document.getElementById('scenarioDesc');
+        const resetButton = document.getElementById('resetButton');
         const audioPlayer = document.getElementById('audioPlayer');
+        const userInput = document.getElementById('userInput');
+        const sendButton = document.getElementById('sendButton');
 
         let mediaRecorder;
         let audioChunks = [];
         let isRecording = false;
 
-        // Update description on change
+        // 1. Handle Scenario UI Changes
         function updateDesc() {
             const key = scenarioSelect.value;
             scenarioDesc.textContent = scenariosData[key].description;
+            // Optional: Auto-reset chat when changing scenario
+            chatMessages.innerHTML = '<div class="message bot-message">Scenario changed. Start speaking!</div>';
         }
-        scenarioSelect.addEventListener('change', updateDesc);
-        updateDesc(); // Init
 
-        // Reset Session
-        async function resetScenario() {
+        scenarioSelect.addEventListener('change', updateDesc);
+        // Initialize description
+        updateDesc();
+
+        // 2. Handle Reset
+        resetButton.addEventListener('click', async () => {
             const formData = new FormData();
             formData.append('session_id', sessionId);
-            await fetch('/api/reset-session', { method: 'POST', body: formData });
-            chatContainer.innerHTML = '<div class="text-center text-gray-400 text-sm mt-4">Conversation reset. Start speaking!</div>';
-        }
+            try {
+                await fetch('/api/reset-session', { method: 'POST', body: formData });
+                chatMessages.innerHTML = '<div class="message bot-message">Conversation reset. Start speaking!</div>';
+            } catch (err) {
+                console.error('Reset error:', err);
+            }
+        });
 
-        // Recording Logic
-        recordBtn.addEventListener('click', async () => {
+        // 3. Audio Recording Logic
+        recordButton.addEventListener('click', async () => {
             if (!isRecording) {
                 startRecording();
             } else {
@@ -101,71 +127,109 @@
 
                 mediaRecorder.start();
                 isRecording = true;
-                recordBtn.classList.remove('bg-blue-600');
-                recordBtn.classList.add('bg-red-600', 'animate-pulse');
-                recordBtn.innerHTML = '<i class="fas fa-stop text-2xl"></i>';
+                recordButton.classList.add('recording');
+                recordButton.querySelector('.button-text').textContent = 'Stop';
+                recordingStatus.textContent = 'Recording...';
             } catch (err) {
-                alert("Microphone access denied");
+                alert('Microphone access denied');
             }
         }
 
         function stopRecording() {
             mediaRecorder.stop();
             isRecording = false;
-            recordBtn.classList.add('bg-blue-600');
-            recordBtn.classList.remove('bg-red-600', 'animate-pulse');
-            recordBtn.innerHTML = '<i class="fas fa-microphone text-2xl"></i>';
-            statusDiv.classList.remove('hidden');
+            recordButton.classList.remove('recording');
+            recordButton.querySelector('.button-text').textContent = 'Speak';
+            recordingStatus.textContent = 'Processing...';
         }
 
+        // 4. Sending Logic (Unified for Audio and Text)
         async function sendAudio() {
             const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
             const formData = new FormData();
             formData.append('audio', audioBlob, 'input.wav');
+            // Append common data
+            appendCommonData(formData);
+            
+            await processResponse(formData);
+        }
+
+        async function sendText() {
+            const text = userInput.value.trim();
+            if (!text) return;
+
+            // Add user message immediately for UI responsiveness
+            addMessage('You', text, null, true);
+            userInput.value = '';
+
+            const formData = new FormData();
+            formData.append('text', text);
+            // Append common data
+            appendCommonData(formData);
+
+            await processResponse(formData);
+        }
+
+        function appendCommonData(formData) {
             formData.append('language', language);
             formData.append('scenario', scenarioSelect.value);
             formData.append('session_id', sessionId);
+        }
 
+        async function processResponse(formData) {
             try {
+                recordingStatus.textContent = 'Thinking...';
+                
                 const response = await fetch('/api/scenario-chat', {
                     method: 'POST',
                     body: formData
                 });
 
-                if (!response.ok) throw new Error("Server Error");
+                if (!response.ok) throw new Error('Server Error');
                 const data = await response.json();
-                
-                addMessage('You', data.transcribedText, data.translatedUserText, true);
+
+                // If it was audio input, the user message is added here after transcription
+                if (data.transcribedText && !formData.has('text')) {
+                    addMessage('You', data.transcribedText, data.translatedUserText, true);
+                }
+
                 addMessage('Assistant', data.botResponse, data.botResponseEnglish, false);
 
-                // Play Audio
-                audioPlayer.src = `/api/audio/${data.audioId}`;
-                audioPlayer.play();
-
+                if (data.audioId) {
+                    audioPlayer.src = `/api/audio/${data.audioId}`;
+                    audioPlayer.play();
+                }
             } catch (e) {
                 console.error(e);
-                alert("Something went wrong.");
+                alert('Something went wrong.');
             } finally {
-                statusDiv.classList.add('hidden');
+                recordingStatus.textContent = 'Ready';
             }
         }
 
+        // 5. UI Helpers
         function addMessage(role, text, translation, isUser) {
-            const div = document.createElement('div');
-            div.className = `flex flex-col ${isUser ? 'items-end' : 'items-start'}`;
-            
-            const bubble = document.createElement('div');
-            bubble.className = `max-w-[80%] p-3 rounded-lg shadow ${isUser ? 'bg-blue-100 text-blue-900' : 'bg-white text-gray-900 border'}`;
-            
-            bubble.innerHTML = `
-                <div class="font-medium mb-1">${text}</div>
-                <div class="text-xs opacity-75 border-t border-gray-300 pt-1 mt-1">${translation}</div>
+            // Remove empty state if it exists
+            const emptyState = chatMessages.querySelector('.empty-state');
+            if (emptyState) emptyState.remove();
+
+            const messageBubble = document.createElement('div');
+            messageBubble.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
+
+            messageBubble.innerHTML = `
+                <div class="message-text">${text}</div>
+                ${translation ? `<div class="translation">${translation}</div>` : ''}
             `;
 
-            div.appendChild(bubble);
-            chatContainer.appendChild(div);
-            chatContainer.scrollTop = chatContainer.scrollHeight;
+            chatMessages.appendChild(messageBubble);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
         }
+
+        // Event Listeners for Text Input
+        sendButton.addEventListener('click', sendText);
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendText();
+        });
     </script>
 </body>
 </html>
