@@ -1,45 +1,46 @@
 document.addEventListener('DOMContentLoaded', function () {
     const recordButton = document.getElementById('recordButton');
     const recordingStatus = document.getElementById('recordingStatus');
-    const language = window.location.pathname.includes('chinese') ? 'chinese' : 'japanese';
+    // Detect language from URL or default to chinese
+    const language = window.location.pathname.includes('japanese') ? 'japanese' : 'chinese';
     const dynamicImage = document.getElementById('dynamic-image');
+    
+    // New elements for feedback
+    const feedbackContainer = document.getElementById('feedback-container');
+    const feedbackText = document.getElementById('feedback-text');
     
     if (!dynamicImage) {
         console.error('Dynamic image element not found');
         return;
     }
     
-    const url = dynamicImage.src;
-
+    const initialUrl = dynamicImage.src;
     let mediaRecorder;
     let audioChunks = [];
     let isRecording = false;
 
-    // Ask the user what they see by playing the sound
+    // Play initial welcome audio
     playAudio(language + "_image");
 
-    // Function to play audio
-    function playAudio(audioId) {
-        fetch(`/api/audio/${audioId}`)
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-            })
-            .catch(error => {
-                console.error('Error playing audio:', error);
-            });
+    function playAudio(audioSource) {
+        // If it's a full URL (from backend response), use it directly
+        // Otherwise treat it as an ID for the /api/audio endpoint
+        const src = audioSource.startsWith('/') || audioSource.startsWith('http') 
+            ? audioSource 
+            : `/api/audio/${audioSource}`;
+
+        const audio = new Audio(src);
+        audio.play().catch(error => console.error('Error playing audio:', error));
     }
 
-    // Function to handle voice recording
     async function toggleRecording() {
         const sampleRate = 44100;
         const numChannels = 1;
 
         if (!isRecording) {
-            // Start recording
+            // --- START RECORDING ---
             audioChunks = [];
-
+            
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({
                     audio: {
@@ -51,7 +52,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 });
 
                 mediaRecorder = new MediaRecorder(stream, {
-                    mimeType: 'audio/webm',
+                    mimeType: 'audio/webm', 
                     audioBitsPerSecond: 16 * sampleRate
                 });
 
@@ -60,93 +61,97 @@ document.addEventListener('DOMContentLoaded', function () {
                 };
 
                 mediaRecorder.onstop = async () => {
-                    // Show loading state
-                    const statusText = language === 'chinese' ? '处理中...' : '処理中...';
+                    // UI: Processing State
+                    const statusText = language === 'chinese' ? '思考中...' : '考え中...';
                     recordingStatus.textContent = statusText;
+                    
+                    // Hide old feedback while processing
+                    if(feedbackContainer) feedbackContainer.style.display = 'none';
 
-                    // Convert to WAV format
+                    // Convert Audio
                     const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
                     const wavBlob = await convertToWav(audioBlob, sampleRate, numChannels);
 
-                    // Create form data
+                    // Prepare Payload
                     const formData = new FormData();
                     formData.append('audio', wavBlob, 'recording.wav');
                     formData.append('language', language);
-                    formData.append('image_url', url);
+                    // Send current image URL so the VQA model knows what it's looking at
+                    formData.append('image_url', dynamicImage.src); 
 
                     try {
-                        // Send audio to backend
                         const response = await fetch('/api/image_guess', {
                             method: 'POST',
                             body: formData
                         });
 
-                        if (!response.ok) {
-                            throw new Error('Network response was not ok');
-                        }
+                        if (!response.ok) throw new Error('Network response was not ok');
 
                         const data = await response.json();
 
-                        // Update image
-                        const imgElement = document.getElementById('dynamic-image');
-                        imgElement.src = `data:image/jpeg;base64,${data.image}`;
+                        // 1. Update Image (if returned)
+                        if (data.image) {
+                            dynamicImage.src = `data:image/jpeg;base64,${data.image}`;
+                        }
+
+                        // 2. Show Text Feedback
+                        if (data.answer_text && feedbackContainer) {
+                            feedbackText.textContent = data.answer_text;
+                            feedbackContainer.style.display = 'block';
+                        }
+
+                        // 3. Play Audio Response
+                        if (data.audio_url) {
+                            playAudio(data.audio_url);
+                        }
                         
-                        // Reset status
+                        // Reset UI
                         const readyText = language === 'chinese' ? '准备就绪' : '準備ができて';
                         recordingStatus.textContent = readyText;
 
                     } catch (error) {
                         console.error('Error:', error);
-                        const errorText = language === 'chinese' ? '发生错误，请重试' : 'エラーが発生しました';
-                        recordingStatus.textContent = errorText;
+                        recordingStatus.textContent = language === 'chinese' ? '错误' : 'エラー';
                     }
                 };
 
                 mediaRecorder.start(1000);
                 isRecording = true;
 
-                // Update UI
+                // Update UI to "Recording" state
                 recordButton.classList.add('recording');
-                const stopText = language === 'chinese' ? '点击停止录音' : '録音を停止';
+                const stopText = language === 'chinese' ? '停止' : '停止';
                 recordButton.querySelector('.button-text').textContent = stopText;
-                const recordingText = language === 'chinese' ? '正在录音...' : '録音中...';
-                recordingStatus.textContent = recordingText;
+                recordingStatus.textContent = language === 'chinese' ? '正在录音...' : '録音中...';
 
             } catch (error) {
                 console.error('Error accessing microphone:', error);
-                const micErrorText = language === 'chinese' 
-                    ? '无法访问麦克风。请确保您已授予麦克风权限。'
-                    : 'マイクにアクセスできません。マイクの権限を確認してください。';
-                alert(micErrorText);
+                alert('Microphone access denied or not found.');
             }
 
         } else {
-            // Stop recording
+            // --- STOP RECORDING ---
             mediaRecorder.stop();
             isRecording = false;
-
-            // Stop all tracks
+            
+            // Stop stream tracks to release mic
             mediaRecorder.stream.getTracks().forEach(track => track.stop());
 
-            // Update UI
+            // Reset UI Button
             recordButton.classList.remove('recording');
             const startText = language === 'chinese' ? '按下开始录音' : 'クリックして録音開始';
             recordButton.querySelector('.button-text').textContent = startText;
-            const processingText = language === 'chinese' ? '正在处理...' : '処理中...';
-            recordingStatus.textContent = processingText;
         }
     }
 
-    // Helper function to convert audio blob to WAV format
+    // --- Audio Helper Utilities ---
     async function convertToWav(audioBlob, sampleRate, numChannels) {
         const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
         const arrayBuffer = await audioBlob.arrayBuffer();
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        const wavBuffer = createWavFile(audioBuffer, numChannels);
-        return new Blob([wavBuffer], { type: 'audio/wav' });
+        return new Blob([createWavFile(audioBuffer, numChannels)], { type: 'audio/wav' });
     }
 
-    // Function to create WAV file from audio buffer
     function createWavFile(audioBuffer, numChannels) {
         const length = audioBuffer.length;
         const sampleRate = audioBuffer.sampleRate;
@@ -159,7 +164,6 @@ document.addEventListener('DOMContentLoaded', function () {
         const buffer = new ArrayBuffer(44 + dataSize);
         const view = new DataView(buffer);
 
-        // Write WAV header
         writeString(view, 0, 'RIFF');
         view.setUint32(4, 36 + dataSize, true);
         writeString(view, 8, 'WAVE');
@@ -174,7 +178,6 @@ document.addEventListener('DOMContentLoaded', function () {
         writeString(view, 36, 'data');
         view.setUint32(40, dataSize, true);
 
-        // Write audio data
         const floatData = audioBuffer.getChannelData(0);
         let offset = 44;
 
@@ -184,21 +187,16 @@ document.addEventListener('DOMContentLoaded', function () {
             view.setInt16(offset, pcm, true);
             offset += bytesPerSample;
         }
-
         return buffer;
     }
 
-    // Helper function to write strings to DataView
     function writeString(view, offset, string) {
         for (let i = 0; i < string.length; i++) {
             view.setUint8(offset + i, string.charCodeAt(i));
         }
     }
 
-    // Event listener for record button
     if (recordButton) {
         recordButton.addEventListener('click', toggleRecording);
-    } else {
-        console.error('Record button not found');
     }
 });

@@ -5,6 +5,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>中文图像猜测器 | Chinese Image Guesser</title>
     <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        /* Inline styles for the new feedback element */
+        .feedback-container {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f0f4f8;
+            border-radius: 12px;
+            border-left: 5px solid #007bff;
+            display: none; /* Hidden by default */
+            text-align: left;
+            font-size: 1.1em;
+            line-height: 1.5;
+            color: #333;
+        }
+        .feedback-label {
+            font-weight: bold;
+            color: #007bff;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -29,6 +51,11 @@
                 {% if img_file %}
                 <div class="image-container">
                     <img id="dynamic-image" src="{{ img_file }}" alt="Random Image" class="game-image">
+                    
+                    <div id="feedback-container" class="feedback-container">
+                        <div class="feedback-label">AI 回答 (AI Response):</div>
+                        <div id="feedback-text"></div>
+                    </div>
                 </div>
                 {% endif %}
                 

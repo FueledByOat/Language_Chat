@@ -1,14 +1,6 @@
-"""
-FastAPI Language Learning Application
-
-A web application that provides language learning capabilities through text and voice
-chat, image recognition, and translation features for Chinese and Japanese languages.
-
-This is a migration from the original Flask-based LanguageLearningApp.
-"""
-
 # --- Core FastAPI & Python Imports ---
 import os
+import time
 import uuid
 import logging
 import asyncio
@@ -19,6 +11,7 @@ from typing import Optional, Dict, Any, List
 
 # --- FastAPI Imports ---
 from fastapi import (
+    BackgroundTasks,
     FastAPI,
     Request,
     HTTPException,
@@ -49,6 +42,7 @@ import audio_io.audio_io as audio_service
 import language_model.multilingual_model as llm_service
 import translation.translator as translation_service
 import translation.whisper_transcribe_claude as transcription_service
+from vqa_model.vqa_service import VQAService
 import utils.helper as utils
 from config import Config
 
@@ -105,9 +99,9 @@ class VoiceChatResponse(TextChatResponse):
 
 
 class ImageGuessResponse(BaseModel):
-    """Pydantic model for the /api/image_guess response."""
-
-    image: str  # Base64 encoded image string
+    image: str  # Base64 string (original image, no boxes needed for roleplay)
+    answer_text: str  # The text response in target language (CN/JP)
+    audio_url: str  # URL/Path to the generated TTS audio
 
 
 class ErrorResponse(BaseModel):
@@ -144,13 +138,16 @@ async def lifespan(app: FastAPI):
     # 3. Load models (wrapped in to_thread to avoid blocking)
     try:
         # Load Detector
-        logger.info("Loading detector model...")
-        models["detector"] = await asyncio.to_thread(
-            pipeline,
-            model=Config.DETECTOR_CHECKPOINT,
-            task="zero-shot-object-detection",
-        )
-        logger.info(f"Successfully loaded detector model: {Config.DETECTOR_CHECKPOINT}")
+        # logger.info("Loading VQA Service (Phi-3-Vision)...")
+
+        # # Define a helper to instantiate and load weights inside the thread
+        # def _load_vqa_service():
+        #     service = VQAService()
+        #     service.load_model()
+        #     return service
+
+        # models["vqa"] = await asyncio.to_thread(_load_vqa_service)
+        # logger.info("Successfully loaded VQA Service.")
 
         # Load Language Model
         logger.info("Loading language model...")
@@ -184,6 +181,8 @@ async def lifespan(app: FastAPI):
     # === Shutdown ===
     logger.info("Application shutdown...")
     models.clear()
+    # if torch.cuda.is_available():
+    #     torch.cuda.empty_cache()
     await http_client.aclose()
     logger.info("Cleanup complete. Exiting.")
 
@@ -358,88 +357,138 @@ async def _fetch_image_async(image_url: str) -> Image.Image:
         raise
 
 
-async def _detect_objects_in_image_async(
-    image: Image.Image, candidate_labels: List[str]
-) -> Image.Image:
-    """Async wrapper for the CPU-bound object detection."""
+async def _query_vqa_async(image: Image.Image, question_en: str) -> str:
+    """
+    Runs the image and English question through Phi-3-Vision.
+    """
 
-    # This is a synchronous, CPU-bound function, so we run it in a thread
-    def _detect_sync(img, labels):
-        try:
-            predictions = models["detector"](img, candidate_labels=labels)
+    def _run_inference():
+        # 1. Format the prompt for Roleplay
+        # We instruct the model to be concise and helpful.
+        prompt = f"<|user|>\n<|image_1|>\n{question_en}<|end|>\n<|assistant|>\n"
 
-            high_conf = [
-                p for p in predictions if p["score"] > Config.IMAGE_SCORE_THRESHOLD
-            ]
+        # 2. Process Inputs
+        inputs = models["vqa"]["processor"](prompt, [image], return_tensors="pt").to(
+            "cuda"
+        )
 
-            draw = ImageDraw.Draw(img)
-            for pred in high_conf:
-                box = pred["box"]
-                label = pred["label"]
-                score = pred["score"]
-                xmin, ymin, xmax, ymax = box.values()
-                draw.rectangle([xmin, ymin, xmax, ymax], outline="blue", width=3)
-                draw.text(
-                    (xmin, ymin - 20),
-                    f"{label.title()}: {round(score, 2)}",
-                    fill="blue",
-                )
-            return img
-        except Exception as e:
-            logger.error(f"Object detection failed: {e}")
-            return img  # Return original image on failure
+        # 3. Generate Response parameters
+        generation_args = {
+            "max_new_tokens": 100,
+            "temperature": 0.7,
+            "do_sample": True,
+        }
 
-    return await asyncio.to_thread(_detect_sync, image, candidate_labels)
+        # 4. Generate
+        generate_ids = models["vqa"]["model"].generate(
+            **inputs,
+            eos_token_id=models["vqa"]["processor"].tokenizer.eos_token_id,
+            **generation_args,
+        )
+
+        # 5. Decode
+        # Remove input tokens to get just the answer
+        generate_ids = generate_ids[:, inputs["input_ids"].shape[1] :]
+        response = models["vqa"]["processor"].batch_decode(
+            generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
+        )[0]
+
+        return response
+
+    return await asyncio.to_thread(_run_inference)
 
 
 async def _process_image_guess_async(
     audio_file: UploadFile, language: str, image_url: str
 ) -> Dict[str, Any]:
-    """Async version of _process_image_guess."""
+    """Async version of _process_image_guess using the VQA Service."""
     input_audio_path = None
     try:
-        # 1. Save and Transcribe (concurrently)
-        # We can save the file AND fetch the image at the same time
+        # 1. Setup: Save Audio & Fetch Image concurrently
         save_task = asyncio.create_task(_save_uploaded_audio_async(audio_file))
         fetch_task = asyncio.create_task(_fetch_image_async(image_url))
 
         input_audio_path = await save_task
         image = await fetch_task
 
-        # 2. Transcribe (CPU-bound)
-        transcribed_text = await asyncio.to_thread(
+        # 2. Transcribe User Audio (Native Language)
+        # e.g. "Where is the red car?"
+        user_text_native = await asyncio.to_thread(
             models["transcription_model"].transcribe_audio,
             audio_file=input_audio_path,
             language=language,
         )
 
-        # 3. Translate (I/O-bound)
-        translated_guess = await asyncio.to_thread(
-            models["translator"].translate_to_english, transcribed_text, language
+        # 3. Translate User Question -> English
+        # Phi-3-Vision works best in English
+        user_text_en = await asyncio.to_thread(
+            models["translator"].translate_to_english, user_text_native, language
         )
 
-        # 4. Detect Objects (CPU-bound)
-        processed_image = await _detect_objects_in_image_async(
-            image, [translated_guess]
+        # 4. VQA Inference (Using our new Service Wrapper)
+        # We add a "persona" here to make the game fun
+        prompt = f"You are a helpful language tutor. Briefly answer this question based on the image: {user_text_en}"
+
+        #
+        # This call goes to the Service Layer -> GPU
+        vqa_answer_en = await _query_vqa_async(image, prompt)
+
+        # 5. Translate Answer -> Native Language (Target Language)
+        # e.g. "The red car is on the left." -> "红色的小车在左边。"
+        vqa_answer_native = await asyncio.to_thread(
+            models["translator"].translate_from_english, vqa_answer_en, language
         )
 
-        # 5. Convert image to base64 (CPU-bound)
+        # 6. Generate Audio Response (TTS)
+        # Create a unique ID for caching
+        import uuid
+
+        audio_filename = f"response_{uuid.uuid4().hex}"
+
+        # Assuming you have a TTS service or function
+        audio_path = await _get_or_create_cached_audio_async(
+            audio_filename, vqa_answer_native, language
+        )
+
+        audio_url = f"/api/audio/{audio_filename}"
+
+        # 7. Return Data
+        # We re-encode the image to base64 to ensure the frontend displays exactly what the model saw
         def _encode_image(img):
             buffered = BytesIO()
             img.save(buffered, format="JPEG")
             return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-        img_str = await asyncio.to_thread(_encode_image, processed_image)
+        img_str = await asyncio.to_thread(_encode_image, image)
 
-        return {"image": img_str}
+        return {
+            "image": img_str,
+            "answer_text": vqa_answer_native,
+            "audio_url": audio_url,
+        }
 
     finally:
-        # Clean up audio file
         if input_audio_path and os.path.exists(input_audio_path):
             try:
                 await asyncio.to_thread(os.remove, input_audio_path)
-            except OSError as e:
-                logger.warning(f"Failed to clean up audio file {input_audio_path}: {e}")
+            except Exception as e:
+                logger.error(f"Cleanup failed: {e}")
+
+
+async def _query_vqa_async(image: Image.Image, question_en: str) -> str:
+    """
+    Non-blocking wrapper for the VQA service.
+    Runs the heavy GPU inference in a separate thread.
+    """
+    if "vqa" not in models:
+        raise RuntimeError("VQA Model not loaded")
+
+    # We use asyncio.to_thread to run the synchronous service method
+    response = await asyncio.to_thread(
+        models["vqa"].analyze_image, image=image, question_en=question_en
+    )
+
+    return response
 
 
 async def _fetch_random_image_async() -> Optional[str]:

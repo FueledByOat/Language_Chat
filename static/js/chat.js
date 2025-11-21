@@ -8,14 +8,52 @@ document.addEventListener('DOMContentLoaded', function() {
     let mediaRecorder;
     let audioChunks = [];
     let isRecording = false;
-    
-    // Function to add a user message to the chat
+
+    // --- 1. Global Audio Player (The Fix) ---
+    // We use a single global audio object. We "bless" (load) this object
+    // immediately whenever the user clicks a button.
+    const globalAudioPlayer = new Audio();
+
+    // --- 2. UI Helper Functions ---
+
+    function scrollToBottom() {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+
+    function playAudio(audioId) {
+        const audioUrl = `/api/audio/${audioId}`;
+        
+        // Reset the player
+        globalAudioPlayer.pause();
+        globalAudioPlayer.currentTime = 0;
+        globalAudioPlayer.src = audioUrl;
+        
+        // Attempt to play with a retry mechanism (in case file system is slow)
+        const attemptPlay = (retries = 3) => {
+            globalAudioPlayer.play().catch(error => {
+                if (error.name === 'NotAllowedError') {
+                    console.error("Autoplay blocked. Browser lost user gesture context.");
+                    recordingStatus.textContent = "⚠️ Click 'Play' in chat (Autoplay blocked)";
+                } else if (retries > 0) {
+                    // Retry if file not ready (404)
+                    setTimeout(() => attemptPlay(retries - 1), 500);
+                } else {
+                    console.error('Audio playback error:', error);
+                }
+            });
+        };
+        
+        attemptPlay();
+    }
+
     function addUserMessage(originalText, translatedText) {
         const messageDiv = document.createElement('div');
         messageDiv.className = 'message user-message';
         
         // Add original text
-        messageDiv.textContent = originalText;
+        const textDiv = document.createElement('div');
+        textDiv.textContent = originalText;
+        messageDiv.appendChild(textDiv);
         
         // Add translation if available
         if (translatedText) {
@@ -28,14 +66,15 @@ document.addEventListener('DOMContentLoaded', function() {
         chatMessages.appendChild(messageDiv);
         scrollToBottom();
     }
-    
-    // Function to add a bot message to the chat
+
     function addBotMessage(originalText, translatedText, audioId) {
         const messageDiv = document.createElement('div');
         messageDiv.className = 'message bot-message';
         
         // Add original text
-        messageDiv.textContent = originalText;
+        const textDiv = document.createElement('div');
+        textDiv.textContent = originalText;
+        messageDiv.appendChild(textDiv);
         
         // Add response sections
         const responseSection = document.createElement('div');
@@ -43,8 +82,9 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Add translation if available
         if (translatedText) {
-            const translationSpan = document.createElement('span');
-            translationSpan.innerHTML = `<span class="response-label">English:</span> ${translatedText}`;
+            const translationSpan = document.createElement('div');
+            translationSpan.className = 'translation';
+            translationSpan.innerHTML = `<span class="response-label">En:</span> ${translatedText}`;
             responseSection.appendChild(translationSpan);
         }
         
@@ -53,10 +93,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const playButton = document.createElement('button');
             playButton.className = 'play-audio';
             playButton.innerHTML = '🔊 Play';
-            playButton.dataset.audioId = audioId;
-            playButton.addEventListener('click', function() {
-                playAudio(audioId);
-            });
+            // This click will always work because it is a direct user action
+            playButton.onclick = function() { playAudio(audioId); };
             responseSection.appendChild(playButton);
         }
         
@@ -64,44 +102,23 @@ document.addEventListener('DOMContentLoaded', function() {
         chatMessages.appendChild(messageDiv);
         scrollToBottom();
     }
-    
-    // Function to scroll to the bottom of the chat
-    function scrollToBottom() {
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
-    
-    // Function to play audio
-    function playAudio(audioId) {
-    // 1. Create a new Audio object
-        const audio = new Audio();
-        
-        // 2. Set its source to your API endpoint
-        audio.src = `/api/audio/${audioId}`;
-        
-        // 3. Play it
-        audio.play().catch(error => {
-            // This catch block handles errors if the browser blocks autoplay
-            console.error('Error playing audio:', error);
-            alert('Error playing audio. Check console for details.');
-        });
-    }
-    
-    // Function to send text message
+
+    // --- 3. Text Chat Logic ---
+
     async function sendTextMessage() {
         const message = userInput.value.trim();
         if (message === '') return;
         
-        // Clear input field
-        userInput.value = '';
+        // 1. BLESS THE AUDIO: User clicked send, so we prep the player immediately
+        globalAudioPlayer.src = '';
+        globalAudioPlayer.load();
         
-        // Show loading state
-        recordingStatus.textContent = "处理中...";
+        userInput.value = '';
+        recordingStatus.textContent = "Thinking...";
         
         try {
-            // Get language from the page URL
             const language = window.location.pathname.includes('chinese') ? 'chinese' : 'japanese';
             
-            // Send message to backend and get response
             const response = await fetch('/api/text-chat', {
                 method: 'POST',
                 headers: {
@@ -113,255 +130,228 @@ document.addEventListener('DOMContentLoaded', function() {
                 })
             });
             
-            if (!response.ok) {
-                throw new Error('Network response was not ok');
-            }
+            if (!response.ok) throw new Error('Network response was not ok');
             
             const data = await response.json();
             
-            // Add user message to chat
             addUserMessage(message, data.translatedUserText);
-            
-            // Add bot response to chat
             addBotMessage(data.botResponse, data.botResponseEnglish, data.audioId);
             
             if (data.audioId) {
                 playAudio(data.audioId);
             }
-
-            // Reset status
-            recordingStatus.textContent = "准备就绪";
+            
+            recordingStatus.textContent = "Ready";
             
         } catch (error) {
             console.error('Error:', error);
-            recordingStatus.textContent = "发生错误，请重试";
+            recordingStatus.textContent = "Error, please try again";
         }
     }
-    
-// Function to handle voice recording
-async function toggleRecording() {
-    const sampleRate = 44100;
-    const numChannels = 1;
-    
-    if (!isRecording) {
-        audioChunks = [];
+
+    // --- 4. Voice Recording Logic ---
+
+    async function toggleRecording() {
+        const sampleRate = 44100;
+        const numChannels = 1;
         
-        try {
-            // CRITICAL: Check for HTTPS (except localhost)
-            if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-                alert('录音功能需要HTTPS连接。请使用HTTPS访问此网站。');
-                return;
+        if (!isRecording) {
+            // --- START RECORDING ---
+            audioChunks = [];
+            
+            try {
+                // HTTPS check
+                if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
+                    alert('HTTPS is required for microphone access.');
+                    return;
+                }
+                
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    audio: { 
+                        sampleRate: sampleRate,
+                        channelCount: numChannels,
+                        echoCancellation: true,
+                        noiseSuppression: true
+                    } 
+                });
+                
+                // Browser compatibility check
+                let mimeType = 'audio/webm';
+                if (MediaRecorder.isTypeSupported('audio/mp4')) {
+                    mimeType = 'audio/mp4'; // Safari
+                } else if (!MediaRecorder.isTypeSupported('audio/webm')) {
+                    mimeType = ''; // Default
+                }
+                
+                mediaRecorder = new MediaRecorder(stream, 
+                    mimeType ? { mimeType, audioBitsPerSecond: 128000 } : {}
+                );
+                
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
+                
+                mediaRecorder.onstop = async () => {
+                    recordingStatus.textContent = "Processing...";
+                    
+                    const audioBlob = new Blob(audioChunks, { type: mimeType || 'audio/webm' });
+                    
+                    try {
+                        // Convert to WAV (Keep existing logic for compatibility)
+                        const wavBlob = await convertToWav(audioBlob, sampleRate, numChannels);
+                        
+                        const formData = new FormData();
+                        formData.append('audio', wavBlob, 'recording.wav');
+                        formData.append('language', window.location.pathname.includes('chinese') ? 'chinese' : 'japanese');
+                        
+                        const response = await fetch('/api/voice-chat', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        if (!response.ok) throw new Error('Server error: ' + response.status);
+                        
+                        const data = await response.json();
+                        
+                        addUserMessage(data.transcribedText, data.translatedUserText);
+                        addBotMessage(data.botResponse, data.botResponseEnglish, data.audioId);
+                        
+                        if (data.audioId) {
+                            playAudio(data.audioId);
+                        }
+                        
+                        recordingStatus.textContent = "Ready";
+                        
+                    } catch (error) {
+                        console.error('Processing error:', error);
+                        recordingStatus.textContent = "Processing failed";
+                    }
+                };
+                
+                mediaRecorder.onerror = (event) => {
+                    console.error('MediaRecorder error:', event.error);
+                    recordingStatus.textContent = "Recording Error";
+                    isRecording = false;
+                    recordButton.classList.remove('recording');
+                    recordButton.querySelector('.button-text').textContent = "Start Recording";
+                };
+                
+                mediaRecorder.start(1000);
+                isRecording = true;
+                
+                recordButton.classList.add('recording');
+                recordButton.querySelector('.button-text').textContent = "Stop Recording";
+                recordingStatus.textContent = "Recording...";
+                
+            } catch (error) {
+                console.error('Microphone access error:', error);
+                alert("Microphone access denied or not found.");
+                recordingStatus.textContent = "Ready";
             }
             
-            // Request microphone access
-            const stream = await navigator.mediaDevices.getUserMedia({ 
-                audio: { 
-                    sampleRate: sampleRate,
-                    channelCount: numChannels,
-                    echoCancellation: true,
-                    noiseSuppression: true
-                } 
-            });
+        } else {
+            // --- STOP RECORDING ---
             
-            // Detect supported MIME type for iOS Safari
-            let mimeType = 'audio/webm';
-            if (MediaRecorder.isTypeSupported('audio/mp4')) {
-                mimeType = 'audio/mp4'; // iOS Safari prefers this
-            } else if (!MediaRecorder.isTypeSupported('audio/webm')) {
-                mimeType = ''; // Let browser choose default
-            }
-            
-            mediaRecorder = new MediaRecorder(stream, 
-                mimeType ? { mimeType, audioBitsPerSecond: 128000 } : {}
-            );
-            
-            mediaRecorder.ondataavailable = (event) => {
-                if (event.data.size > 0) {
-                    audioChunks.push(event.data);
-                }
-            };
-            
-            mediaRecorder.onstop = async () => {
-                recordingStatus.textContent = "处理中...";
-                
-                // Get the recorded audio blob
-                const audioBlob = new Blob(audioChunks, { type: mimeType || 'audio/webm' });
-                
-                try {
-                    // Convert to WAV
-                    const wavBlob = await convertToWav(audioBlob, sampleRate, numChannels);
-                    
-                    // Create form data
-                    const formData = new FormData();
-                    formData.append('audio', wavBlob, 'recording.wav');
-                    formData.append('language', window.location.pathname.includes('chinese') ? 'chinese' : 'japanese');
-                    
-                    // Send to backend
-                    const response = await fetch('/api/voice-chat', {
-                        method: 'POST',
-                        body: formData
-                    });
-                    
-                    if (!response.ok) {
-                        throw new Error('Server error: ' + response.status);
-                    }
-                    
-                    const data = await response.json();
-                    
-                    addUserMessage(data.transcribedText, data.translatedUserText);
-                    addBotMessage(data.botResponse, data.botResponseEnglish, data.audioId);
-                    
-                    if (data.audioId) {
-                        playAudio(data.audioId);
-                    }
-                    
-                    recordingStatus.textContent = "准备就绪";
-                    
-                } catch (error) {
-                    console.error('Processing error:', error);
-                    recordingStatus.textContent = "处理失败，请重试";
-                }
-            };
-            
-            mediaRecorder.onerror = (event) => {
-                console.error('MediaRecorder error:', event.error);
-                recordingStatus.textContent = "录音错误";
+            // 1. BLESS THE AUDIO: This is the critical fix for Voice.
+            // The user just clicked "Stop", so we use this gesture to unlock audio.
+            globalAudioPlayer.src = '';
+            globalAudioPlayer.load();
+
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
                 isRecording = false;
+                
+                // Stop tracks
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                
                 recordButton.classList.remove('recording');
-                recordButton.querySelector('.button-text').textContent = "按下开始录音";
-            };
-            
-            mediaRecorder.start(1000);
-            isRecording = true;
-            
-            recordButton.classList.add('recording');
-            recordButton.querySelector('.button-text').textContent = "点击停止录音";
-            recordingStatus.textContent = "正在录音...";
-            
-        } catch (error) {
-            console.error('Microphone access error:', error);
-            
-            // Specific error messages for iOS Safari
-            let errorMessage = '无法访问麦克风。';
-            
-            if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-                errorMessage = '麦克风权限被拒绝。请在设置中允许此网站访问麦克风。\n\niPhone用户：设置 > Safari > 麦克风';
-            } else if (error.name === 'NotFoundError') {
-                errorMessage = '未找到麦克风设备。';
-            } else if (error.name === 'NotReadableError') {
-                errorMessage = '麦克风正被其他应用使用。';
-            } else if (error.name === 'SecurityError') {
-                errorMessage = '安全错误：请使用HTTPS连接。';
+                recordButton.querySelector('.button-text').textContent = "Start Recording";
+                recordingStatus.textContent = "Processing...";
             }
-            
-            alert(errorMessage);
-            recordingStatus.textContent = "准备就绪";
+        }
+    }
+
+    // --- 5. WAV Conversion Helpers (Unchanged) ---
+
+    async function convertToWav(audioBlob, sampleRate, numChannels) {
+        try {
+            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+            const audioContext = new AudioContextClass({ sampleRate });
+            const arrayBuffer = await audioBlob.arrayBuffer();
+            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+            const wavBuffer = createWavFile(audioBuffer, numChannels);
+            audioContext.close();
+            return new Blob([wavBuffer], { type: 'audio/wav' });
+        } catch (error) {
+            console.error('WAV conversion error:', error);
+            throw new Error('Audio conversion failed');
+        }
+    }
+
+    function createWavFile(audioBuffer, numChannels) {
+        const length = audioBuffer.length;
+        const sampleRate = audioBuffer.sampleRate;
+        const bitsPerSample = 16;
+        const bytesPerSample = bitsPerSample / 8;
+        const blockAlign = numChannels * bytesPerSample;
+        const byteRate = sampleRate * blockAlign;
+        const dataSize = length * blockAlign;
+        
+        const buffer = new ArrayBuffer(44 + dataSize);
+        const view = new DataView(buffer);
+        
+        writeString(view, 0, 'RIFF');
+        view.setUint32(4, 36 + dataSize, true);
+        writeString(view, 8, 'WAVE');
+        writeString(view, 12, 'fmt ');
+        view.setUint32(16, 16, true); 
+        view.setUint16(20, 1, true); 
+        view.setUint16(22, numChannels, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, byteRate, true);
+        view.setUint16(32, blockAlign, true);
+        view.setUint16(34, bitsPerSample, true);
+        writeString(view, 36, 'data');
+        view.setUint32(40, dataSize, true);
+        
+        const floatData = audioBuffer.getChannelData(0);
+        let offset = 44;
+        
+        for (let i = 0; i < length; i++) {
+            const sample = Math.max(-1, Math.min(1, floatData[i]));
+            const pcm = sample < 0 ? sample * 32768 : sample * 32767;
+            view.setInt16(offset, pcm, true);
+            offset += bytesPerSample;
         }
         
+        return buffer;
+    }
+
+    function writeString(view, offset, string) {
+        for (let i = 0; i < string.length; i++) {
+            view.setUint8(offset + i, string.charCodeAt(i));
+        }
+    }
+
+    // --- 6. Event Listeners ---
+
+    if (recordButton) {
+        recordButton.addEventListener('click', toggleRecording);
     } else {
-        // Stop recording
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-            mediaRecorder.stop();
-            isRecording = false;
-            
-            // Stop all tracks
-            mediaRecorder.stream.getTracks().forEach(track => track.stop());
-            
-            recordButton.classList.remove('recording');
-            recordButton.querySelector('.button-text').textContent = "按下开始录音";
-            recordingStatus.textContent = "正在处理...";
-        }
+        console.error("Record button not found in DOM");
     }
-}
 
-// Helper function to convert audio blob to WAV format
-async function convertToWav(audioBlob, sampleRate, numChannels) {
-    try {
-        // iOS Safari uses webkitAudioContext
-        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-        const audioContext = new AudioContextClass({ sampleRate });
-        
-        const arrayBuffer = await audioBlob.arrayBuffer();
-        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        
-        const wavBuffer = createWavFile(audioBuffer, numChannels);
-        
-        // Close context to free resources
-        audioContext.close();
-        
-        return new Blob([wavBuffer], { type: 'audio/wav' });
-    } catch (error) {
-        console.error('WAV conversion error:', error);
-        throw new Error('音频转换失败');
+    if (sendButton) {
+        sendButton.addEventListener('click', sendTextMessage);
     }
-}
 
-// Function to create WAV file from audio buffer
-function createWavFile(audioBuffer, numChannels) {
-    const length = audioBuffer.length;
-    const sampleRate = audioBuffer.sampleRate;
-    const bitsPerSample = 16;
-    const bytesPerSample = bitsPerSample / 8;
-    const blockAlign = numChannels * bytesPerSample;
-    const byteRate = sampleRate * blockAlign;
-    const dataSize = length * blockAlign;
-    
-    // WAV header is 44 bytes
-    const buffer = new ArrayBuffer(44 + dataSize);
-    const view = new DataView(buffer);
-    
-    // Write WAV header
-    // "RIFF" chunk descriptor
-    writeString(view, 0, 'RIFF');
-    view.setUint32(4, 36 + dataSize, true);
-    writeString(view, 8, 'WAVE');
-    
-    // "fmt " sub-chunk
-    writeString(view, 12, 'fmt ');
-    view.setUint32(16, 16, true); // subchunk1 size (16 for PCM)
-    view.setUint16(20, 1, true); // PCM format
-    view.setUint16(22, numChannels, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, byteRate, true);
-    view.setUint16(32, blockAlign, true);
-    view.setUint16(34, bitsPerSample, true);
-    
-    // "data" sub-chunk
-    writeString(view, 36, 'data');
-    view.setUint32(40, dataSize, true);
-    
-    // Write audio data
-    const floatData = audioBuffer.getChannelData(0); // Get mono channel
-    let offset = 44;
-    
-    for (let i = 0; i < length; i++) {
-        // Convert float to 16-bit PCM
-        const sample = Math.max(-1, Math.min(1, floatData[i]));
-        const pcm = sample < 0 ? sample * 32768 : sample * 32767;
-        view.setInt16(offset, pcm, true);
-        offset += bytesPerSample;
+    if (userInput) {
+        userInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendTextMessage();
+            }
+        });
     }
-    
-    return buffer;
-}
-
-// Helper function to write strings to DataView
-function writeString(view, offset, string) {
-    for (let i = 0; i < string.length; i++) {
-        view.setUint8(offset + i, string.charCodeAt(i));
-    }
-}
-    
-    // Event listener for record button
-    recordButton.addEventListener('click', toggleRecording);
-    
-    // Event listener for send button
-    sendButton.addEventListener('click', sendTextMessage);
-    
-    // Event listener for Enter key in text input
-    userInput.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            sendTextMessage();
-        }
-    });
 });
