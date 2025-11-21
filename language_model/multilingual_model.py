@@ -147,6 +147,10 @@ class MultilingualModel:
         user_message: str,
         language: str,
         use_history: bool = False,
+        external_history: List[
+            Dict[str, str]
+        ] = None,  # NEW: Accept history from outside
+        system_prompt_override: str = None,  # NEW: Accept specific scenario prompt
         max_tokens: int = 150,
         temperature: float = 0.7,
     ) -> str:
@@ -184,7 +188,13 @@ class MultilingualModel:
         target_language = self.SUPPORTED_LANGUAGES[language_lower]
 
         # Build conversation messages
-        messages = self._build_messages(user_message, target_language, use_history)
+        messages = self._build_messages(
+            user_message,
+            target_language,
+            use_history,
+            external_history,
+            system_prompt_override,
+        )
 
         # Generate response
         try:
@@ -213,7 +223,7 @@ class MultilingualModel:
                 raise RuntimeError("Model generated empty response")
 
             # Update conversation history
-            if use_history:
+            if use_history and external_history is None:
                 self.conversation_history.append(
                     {"role": "user", "content": user_message}
                 )
@@ -229,7 +239,12 @@ class MultilingualModel:
             raise RuntimeError(f"Failed to generate response: {e}")
 
     def _build_messages(
-        self, user_message: str, target_language: str, use_history: bool
+        self,
+        user_message: str,
+        target_language: str,
+        use_history: bool,
+        external_history: List[Dict[str, str]] = None,  # NEW
+        system_prompt_override: str = None,  # NEW
     ) -> List[Dict[str, str]]:
         """
         Build the message list for the model including system prompt.
@@ -242,21 +257,35 @@ class MultilingualModel:
         Returns:
             List of message dictionaries
         """
-        # System prompt with clear instructions
-        system_prompt = (
-            f"You are a language learning assistant. The user is practicing {target_language}. "
-            f"IMPORTANT: You MUST respond ONLY in {target_language}. "
-            f"Keep responses natural, conversational, and appropriate for language learners. "
-            f"Use simple to moderate vocabulary and grammar."
-        )
+        # 1. Determine System Prompt
+        if system_prompt_override:
+            # Use the scenario specific prompt
+            final_system_prompt = (
+                f"{system_prompt_override} "
+                f"IMPORTANT: Respond ONLY in {target_language}. "
+                f"Keep responses concise (under 2 sentences) to keep the conversation moving."
+            )
+        else:
+            # Default prompt
+            final_system_prompt = (
+                f"You are a language learning assistant. The user is practicing {target_language}. "
+                f"IMPORTANT: You MUST respond ONLY in {target_language}. "
+                f"Use simple to moderate vocabulary."
+            )
 
-        messages = [{"role": "system", "content": system_prompt}]
+        messages = [{"role": "system", "content": final_system_prompt}]
 
-        # Add conversation history if requested
-        if use_history and self.conversation_history:
-            # Keep last 6 messages (3 exchanges) to avoid context overflow
-            recent_history = self.conversation_history[-6:]
-            messages.extend(recent_history)
+        # 2. Handle History
+        # Priority: External History > Internal History > No History
+        history_to_use = []
+        if external_history is not None:
+            history_to_use = external_history
+        elif use_history:
+            history_to_use = self.conversation_history
+
+        if history_to_use:
+            # Keep last 6 messages
+            messages.extend(history_to_use[-6:])
 
         # Add current user message
         messages.append({"role": "user", "content": user_message})

@@ -70,6 +70,32 @@ http_client = httpx.AsyncClient(timeout=10.0, follow_redirects=True)
 
 SUPPORTED_LANGUAGES = {"chinese", "japanese"}
 
+# ==============================================================================
+# 0.1 Scenario Configuration
+# ==============================================================================
+
+SCENARIOS = {
+    "hotel": {
+        "name": "Hotel Check-in",
+        "description": "You are checking into a hotel. The assistant is the receptionist.",
+        "prompt": "You are a receptionist at a high-end hotel. The user is a guest checking in. Ask for their name, reservation details, and if they need help with bags. Be polite and professional.",
+    },
+    "convenience_store": {
+        "name": "Convenience Store",
+        "description": "You are buying snacks. The assistant is the clerk.",
+        "prompt": "You are a clerk at a busy convenience store (Konbini). The user is a customer buying items. Ask if they want the receipt, if they need a bag, or if they want their bento heated up.",
+    },
+    "taxi": {
+        "name": "Taxi Ride",
+        "description": "You are giving directions to a taxi driver.",
+        "prompt": "You are a taxi driver. The user is a passenger. Ask them where they want to go, confirm the route (highway or local roads), and ask about the air conditioning temperature.",
+    },
+}
+
+# Simple in-memory session store: { "session_id": [ {"role":..., "content":...} ] }
+# In production, use Redis or a Database.
+scenario_sessions: Dict[str, List[Dict[str, str]]] = {}
+
 
 # ==============================================================================
 # 1. Pydantic Models (for Request/Response Validation)
@@ -524,6 +550,91 @@ async def _get_or_create_cached_audio_async(
     return audio_path
 
 
+async def _process_scenario_conversation_async(
+    audio_file: UploadFile, language: str, scenario_key: str, session_id: str
+) -> Dict[str, Any]:
+    """
+    Handles the full loop: Audio -> Text -> LLM (w/ Scenario Prompt & Memory) -> Audio
+    """
+    input_audio_path = None
+
+    # 1. Validation
+    if scenario_key not in SCENARIOS:
+        raise ValueError("Invalid scenario")
+
+    scenario_prompt = SCENARIOS[scenario_key]["prompt"]
+
+    # 2. Initialize Session if not exists
+    if session_id not in scenario_sessions:
+        scenario_sessions[session_id] = []
+
+    current_history = scenario_sessions[session_id]
+
+    try:
+        # 3. Save & Transcribe (Reuse existing logic)
+        input_audio_path = await _save_uploaded_audio_async(audio_file)
+
+        user_text = await asyncio.to_thread(
+            models["transcription_model"].transcribe_audio,
+            audio_file=input_audio_path,
+            language=language,
+        )
+
+        if not user_text:
+            raise ValueError("Could not transcribe audio.")
+
+        # 4. Generate Response with Memory and Scenario Prompt
+        bot_response = await asyncio.to_thread(
+            models["language_model"].generate_response,
+            user_message=user_text,
+            language=language,
+            use_history=False,  # We manually inject history below
+            external_history=current_history,  # Pass the session specific history
+            system_prompt_override=scenario_prompt,
+        )
+
+        # 5. Update Session Memory
+        scenario_sessions[session_id].append({"role": "user", "content": user_text})
+        scenario_sessions[session_id].append(
+            {"role": "assistant", "content": bot_response}
+        )
+
+        # Limit memory to last 10 turns to prevent context overflow
+        if len(scenario_sessions[session_id]) > 10:
+            scenario_sessions[session_id] = scenario_sessions[session_id][-10:]
+
+        # 6. Translate & TTS (Concurrent)
+        audio_id = str(uuid.uuid4())
+        audio_path = os.path.join(Config.AUDIO_DIR, f"{audio_id}.mp3")
+
+        results = await asyncio.gather(
+            asyncio.to_thread(
+                models["translator"].translate_to_english, user_text, language
+            ),
+            asyncio.to_thread(
+                models["translator"].translate_to_english, bot_response, language
+            ),
+            asyncio.to_thread(
+                audio_service.speak,
+                audio_path=audio_path,
+                text=bot_response,
+                language=language,
+            ),
+        )
+
+        return {
+            "transcribedText": user_text,
+            "translatedUserText": results[0],
+            "botResponse": bot_response,
+            "botResponseEnglish": results[1],
+            "audioId": audio_id,
+        }
+
+    finally:
+        if input_audio_path and os.path.exists(input_audio_path):
+            await asyncio.to_thread(os.remove, input_audio_path)
+
+
 # ==============================================================================
 # 5. Route Handlers - HTML Pages
 # ==============================================================================
@@ -597,6 +708,18 @@ async def language_image_page(request: Request, language: str):
         return templates.TemplateResponse(
             "500.html", {"request": request}, status_code=500
         )
+
+
+@app.get("/{language}/scenario", response_class=HTMLResponse)
+async def scenario_page(request: Request, language: str):
+    """Render the scenario selection page."""
+    if not _is_supported_language(language):
+        raise HTTPException(status_code=404, detail="Language not supported")
+
+    return templates.TemplateResponse(
+        "scenario.html",
+        {"request": request, "language": language, "scenarios": SCENARIOS},
+    )
 
 
 # ==============================================================================
@@ -707,6 +830,32 @@ async def image_guess(
     except Exception as e:
         logger.error(f"Error in image_guess: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/api/scenario-chat")
+async def scenario_chat_endpoint(
+    language: str = Form(...),
+    scenario: str = Form(...),
+    session_id: str = Form(...),
+    audio: UploadFile = File(...),
+):
+    """Endpoint for scenario-based roleplay."""
+    try:
+        result = await _process_scenario_conversation_async(
+            audio, language, scenario, session_id
+        )
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"Scenario chat failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/reset-session")
+async def reset_session(session_id: str = Form(...)):
+    """Clear memory for a specific session."""
+    if session_id in scenario_sessions:
+        del scenario_sessions[session_id]
+    return JSONResponse(content={"status": "cleared"})
 
 
 # ==============================================================================
