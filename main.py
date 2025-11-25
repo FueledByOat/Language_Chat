@@ -60,14 +60,8 @@ logger = logging.getLogger(__name__)
 
 # Directory for serving HTML templates
 templates = Jinja2Templates(directory="templates")
-
-# This is a global "state" dictionary to hold our loaded models
-# It will be populated by the `lifespan` event
 models: Dict[str, Any] = {}
-
-# Re-usable async HTTP client (replaces `requests`)
-http_client = httpx.AsyncClient(timeout=10.0, follow_redirects=True)
-
+http_client = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
 SUPPORTED_LANGUAGES = {"chinese", "japanese"}
 
 # ==============================================================================
@@ -211,7 +205,8 @@ SCENARIOS = {
 # Simple in-memory session store: { "session_id": [ {"role":..., "content":...} ] }
 # In production, use Redis or a Database.
 scenario_sessions: Dict[str, List[Dict[str, str]]] = {}
-
+translation_cache: Dict[str, Dict[str, str]] = {}
+cache_lock = asyncio.Lock()
 
 # ==============================================================================
 # 1. Pydantic Models (for Request/Response Validation)
@@ -277,48 +272,52 @@ async def lifespan(app: FastAPI):
     # 2. Ensure audio directory exists
     os.makedirs(Config.AUDIO_DIR, exist_ok=True)
 
-    # 3. Load models (wrapped in to_thread to avoid blocking)
+    # 2. Load Models (Independently!)
+
+    # --- Load VQA Service ---
     try:
-        # Load Detector
-        # logger.info("Loading VQA Service (Phi-3-Vision)...")
 
-        # # Define a helper to instantiate and load weights inside the thread
-        # def _load_vqa_service():
-        #     service = VQAService()
-        #     service.load_model()
-        #     return service
+        def _load_vqa():
+            service = VQAService()
+            service.load_model()
+            return service
 
-        # models["vqa"] = await asyncio.to_thread(_load_vqa_service)
-        # logger.info("Successfully loaded VQA Service.")
+        logger.info("Loading VQA Service (Phi-3-Vision)...")
+        models["vqa"] = await asyncio.to_thread(_load_vqa)
+    except Exception as e:
+        logger.error(f"❌ VQA Service FAILED to load: {e}")
+        # We do NOT raise here, so the app continues loading other models
 
-        # Load Language Model
+    # --- Load Language Model ---
+    try:
         logger.info("Loading language model...")
         models["language_model"] = await asyncio.to_thread(
             llm_service.MultilingualModel
         )
-        logger.info(
-            f"Successfully loaded language model: {models['language_model'].model_id}"
-        )
+    except Exception as e:
+        logger.critical(f"❌ Language Model FAILED to load: {e}")
 
-        # Load Transcription Model
+    # --- Load Transcription Model ---
+    try:
         logger.info("Loading transcription model...")
         models["transcription_model"] = await asyncio.to_thread(
             transcription_service.SpeechTranscriber
         )
-        logger.info("Successfully loaded transcription model.")
+    except Exception as e:
+        logger.critical(f"❌ Transcription Model FAILED to load: {e}")
 
-        # Load Translator (as a singleton instance)
+    # --- Load Translator ---
+    try:
         logger.info("Initializing translator...")
         models["translator"] = await asyncio.to_thread(translation_service.Translator)
-        logger.info("Successfully initialized translator.")
-
     except Exception as e:
-        logger.critical(f"Failed to load critical models: {e}", exc_info=True)
-        # Note: You might want to exit the app if models fail to load
+        logger.critical(f"❌ Translator FAILED to load: {e}")
 
-    logger.info("All models loaded. Application is ready.")
+    logger.info(
+        "Startup sequence complete. Checking active models: " + ", ".join(models.keys())
+    )
 
-    yield  # --- Application is now running ---
+    yield
 
     # === Shutdown ===
     logger.info("Application shutdown...")
@@ -369,23 +368,98 @@ def _is_valid_audio_id(audio_id: str) -> bool:
         return audio_id.replace("_", "").replace("-", "").isalnum()
 
 
+async def run_translation_task(
+    user_text: str, bot_response: str, language: str, message_id: str
+):
+    """
+    Runs in the background. Translates text and saves it to the cache.
+    FIXED: Use translate_to_english() instead of translate()
+    """
+    try:
+        logger.info(f"Starting background translation for message {message_id}")
+
+        # Run translations concurrently
+        # FIXED: Changed from translate() to translate_to_english()
+        results = await asyncio.gather(
+            asyncio.to_thread(
+                models["translator"].translate_to_english, user_text, language
+            ),
+            asyncio.to_thread(
+                models["translator"].translate_to_english, bot_response, language
+            ),
+            return_exceptions=True,  # Capture exceptions instead of failing immediately
+        )
+
+        # Check for errors in results
+        user_translation = results[0]
+        bot_translation = results[1]
+
+        if isinstance(user_translation, Exception):
+            logger.error(f"Error translating user text: {user_translation}")
+            user_translation = "(Translation failed)"
+
+        if isinstance(bot_translation, Exception):
+            logger.error(f"Error translating bot text: {bot_translation}")
+            bot_translation = "(Translation failed)"
+
+        # Store result in our cache
+        translation_cache[message_id] = {
+            "user_english": user_translation,
+            "bot_english": bot_translation,
+        }
+
+        logger.info(f"Translations cached for message {message_id}")
+
+    except Exception as e:
+        logger.error(
+            f"Background translation failed for message {message_id}: {e}",
+            exc_info=True,
+        )
+        # Store a fallback in cache so the endpoint doesn't hang
+        translation_cache[message_id] = {
+            "user_english": "(Translation unavailable)",
+            "bot_english": "(Translation unavailable)",
+        }
+
+
 async def _save_uploaded_audio_async(audio_file: UploadFile) -> str:
     """
     Save uploaded audio file with a unique filename using aiofiles.
+    Enhanced with better error handling and validation.
     """
     audio_id = str(uuid.uuid4())
-    # Note: Your whisper pipeline might handle .webm, but your old code
-    # saved as .wav. Sticking to .wav as per your old logic.
     audio_path = os.path.join(Config.AUDIO_DIR, f"{audio_id}.wav")
 
     try:
+        # Ensure directory exists
+        os.makedirs(Config.AUDIO_DIR, exist_ok=True)
+
+        # Reset file pointer to beginning
+        await audio_file.seek(0)
+
+        bytes_written = 0
         async with aiofiles.open(audio_path, "wb") as f:
             while content := await audio_file.read(1024 * 1024):  # Read in 1MB chunks
                 await f.write(content)
+                bytes_written += len(content)
+
+        logger.info(f"Saved audio file: {audio_path} ({bytes_written} bytes)")
+
+        # Validate file was written
+        if bytes_written == 0:
+            raise ValueError("Audio file is empty")
+
         return audio_path
+
     except Exception as e:
+        # Clean up partial file if it exists
+        if os.path.exists(audio_path):
+            try:
+                os.remove(audio_path)
+            except:
+                pass
         logger.error(f"Failed to save uploaded audio file: {e}", exc_info=True)
-        raise
+        raise ValueError(f"Failed to save audio file: {str(e)}")
 
 
 async def _process_text_conversation_async(
@@ -455,11 +529,16 @@ async def _process_text_conversation_async(
 async def _process_voice_conversation_async(
     audio_file: UploadFile, language: str
 ) -> Dict[str, Any]:
-    """Async version of _process_voice_conversation."""
+    """Async version of _process_voice_conversation with better error handling."""
     input_audio_path = None
     try:
         # 1. Save uploaded audio file (async)
         input_audio_path = await _save_uploaded_audio_async(audio_file)
+
+        # Log file details for debugging
+        logger.info(
+            f"Audio file saved: {input_audio_path}, size: {os.path.getsize(input_audio_path)} bytes"
+        )
 
         # 2. Transcribe audio (CPU-bound, run in thread)
         transcribed_text = await asyncio.to_thread(
@@ -468,8 +547,21 @@ async def _process_voice_conversation_async(
             language=language,
         )
 
-        if not transcribed_text:
-            raise ValueError("Transcription returned empty text.")
+        # Better error handling for empty transcription
+        if not transcribed_text or not transcribed_text.strip():
+            logger.warning(f"Empty transcription for file: {input_audio_path}")
+            # Check if audio file is valid
+            file_size = os.path.getsize(input_audio_path)
+            if file_size < 1000:  # Less than 1KB is likely too small
+                raise ValueError(
+                    f"Audio file too small ({file_size} bytes). Please record a longer message."
+                )
+            else:
+                raise ValueError(
+                    "Could not transcribe audio. Please speak clearly and try again."
+                )
+
+        logger.info(f"Transcription successful: {transcribed_text[:50]}...")
 
         # 3. Process as text conversation (already async)
         result = await _process_text_conversation_async(transcribed_text, language)
@@ -478,22 +570,33 @@ async def _process_voice_conversation_async(
         result["transcribedText"] = transcribed_text
         return result
 
+    except ValueError as e:
+        # Re-raise ValueError with user-friendly message
+        logger.error(f"Transcription validation error: {e}")
+        raise
+    except Exception as e:
+        # Log unexpected errors
+        logger.error(f"Unexpected error in voice processing: {e}", exc_info=True)
+        raise ValueError(
+            "An error occurred while processing your voice message. Please try again."
+        )
     finally:
         # 5. Clean up uploaded audio file
         if input_audio_path and os.path.exists(input_audio_path):
             try:
                 # Run cleanup in a thread to avoid blocking
                 await asyncio.to_thread(os.remove, input_audio_path)
+                logger.debug(f"Cleaned up audio file: {input_audio_path}")
             except OSError as e:
                 logger.warning(f"Failed to clean up audio file {input_audio_path}: {e}")
 
 
 async def _fetch_image_async(image_url: str) -> Image.Image:
-    """Async version of _fetch_image using httpx."""
+    """Fetch image from URL and convert to PIL Image."""
     try:
         response = await http_client.get(image_url)
-        response.raise_for_status()  # Raise exception for 4xx/5xx
-        return Image.open(BytesIO(response.content))
+        response.raise_for_status()
+        return Image.open(BytesIO(response.content)).convert("RGB")
     except Exception as e:
         logger.error(f"Failed to fetch image from {image_url}: {e}")
         raise
@@ -543,59 +646,57 @@ async def _query_vqa_async(image: Image.Image, question_en: str) -> str:
 async def _process_image_guess_async(
     audio_file: UploadFile, language: str, image_url: str
 ) -> Dict[str, Any]:
-    """Async version of _process_image_guess using the VQA Service."""
+    """
+    Orchestrates the VQA pipeline:
+    Audio -> Transcribe -> Translate (En) -> VQA -> Translate (Target) -> TTS
+    """
     input_audio_path = None
+
     try:
-        # 1. Setup: Save Audio & Fetch Image concurrently
+        # 1. Parallel Task: Save Audio & Fetch Image
         save_task = asyncio.create_task(_save_uploaded_audio_async(audio_file))
         fetch_task = asyncio.create_task(_fetch_image_async(image_url))
 
         input_audio_path = await save_task
         image = await fetch_task
 
-        # 2. Transcribe User Audio (Native Language)
-        # e.g. "Where is the red car?"
+        # 2. Transcribe User Audio (Target Language)
         user_text_native = await asyncio.to_thread(
             models["transcription_model"].transcribe_audio,
             audio_file=input_audio_path,
             language=language,
         )
+        logger.info(f"User asked (Native): {user_text_native}")
 
-        # 3. Translate User Question -> English
-        # Phi-3-Vision works best in English
+        # 3. Translate User Question -> English (for VQA model)
         user_text_en = await asyncio.to_thread(
             models["translator"].translate_to_english, user_text_native, language
         )
+        logger.info(f"User asked (English): {user_text_en}")
 
-        # 4. VQA Inference (Using our new Service Wrapper)
-        # We add a "persona" here to make the game fun
-        prompt = f"You are a helpful language tutor. Briefly answer this question based on the image: {user_text_en}"
+        # 4. VQA Inference (GPU Bound)
+        # Note: We run this in a thread because analyze_image is synchronous blocking code
+        if "vqa" not in models:
+            raise HTTPException(status_code=503, detail="VQA Model not loaded")
 
-        #
-        # This call goes to the Service Layer -> GPU
-        vqa_answer_en = await _query_vqa_async(image, prompt)
+        vqa_answer_en = await asyncio.to_thread(
+            models["vqa"].analyze_image, image=image, question_en=user_text_en
+        )
+        logger.info(f"VQA Answer (English): {vqa_answer_en}")
 
-        # 5. Translate Answer -> Native Language (Target Language)
-        # e.g. "The red car is on the left." -> "红色的小车在左边。"
+        # 5. Translate Answer -> Native Language
         vqa_answer_native = await asyncio.to_thread(
             models["translator"].translate_from_english, vqa_answer_en, language
         )
 
-        # 6. Generate Audio Response (TTS)
-        # Create a unique ID for caching
-        import uuid
-
+        # 6. Generate TTS Audio
         audio_filename = f"response_{uuid.uuid4().hex}"
-
-        # Assuming you have a TTS service or function
         audio_path = await _get_or_create_cached_audio_async(
             audio_filename, vqa_answer_native, language
         )
+        audio_url_path = f"/api/audio/{audio_filename}"
 
-        audio_url = f"/api/audio/{audio_filename}"
-
-        # 7. Return Data
-        # We re-encode the image to base64 to ensure the frontend displays exactly what the model saw
+        # 7. Encode Image for Frontend (Consistency)
         def _encode_image(img):
             buffered = BytesIO()
             img.save(buffered, format="JPEG")
@@ -606,10 +707,11 @@ async def _process_image_guess_async(
         return {
             "image": img_str,
             "answer_text": vqa_answer_native,
-            "audio_url": audio_url,
+            "audio_url": audio_url_path,
         }
 
     finally:
+        # Cleanup input audio
         if input_audio_path and os.path.exists(input_audio_path):
             try:
                 await asyncio.to_thread(os.remove, input_audio_path)
@@ -634,11 +736,10 @@ async def _query_vqa_async(image: Image.Image, question_en: str) -> str:
 
 
 async def _fetch_random_image_async() -> Optional[str]:
-    """Async version of _fetch_random_image using httpx."""
+    """Gets a random image URL, resolving redirects."""
     try:
         response = await http_client.get("https://picsum.photos/400/400")
-        response.raise_for_status()
-        return str(response.url)  # Get final URL after redirects
+        return str(response.url)
     except httpx.RequestError as e:
         logger.warning(f"Failed to fetch random image: {e}")
         return None
@@ -648,7 +749,8 @@ async def _get_or_create_cached_audio_async(
     cache_key: str, text: str, language: str
 ) -> str:
     """Async version of _get_or_create_cached_audio."""
-    audio_path = os.path.join(Config.AUDIO_DIR, f"{cache_key}.mp3")
+    safe_key = "".join(x for x in cache_key if x.isalnum() or x in "_-")
+    audio_path = os.path.join(Config.AUDIO_DIR, f"{safe_key}.mp3")
 
     # Use aiofiles to check existence async
     try:
@@ -667,12 +769,18 @@ async def _get_or_create_cached_audio_async(
 
 
 async def _process_scenario_conversation_async(
-    audio_file: UploadFile, language: str, scenario_key: str, session_id: str
+    audio_file: Optional[UploadFile],
+    text_input: Optional[str],
+    language: str,
+    scenario_key: str,
+    session_id: str,
+    background_tasks: BackgroundTasks,
 ) -> Dict[str, Any]:
     """
-    Handles the full loop: Audio -> Text -> LLM (w/ Scenario Prompt & Memory) -> Audio
+    Handles the full loop: Text/Audio -> Text -> LLM (w/ Scenario Prompt & Memory) -> Audio
     """
     input_audio_path = None
+    user_text = ""
 
     # 1. Validation
     if scenario_key not in SCENARIOS:
@@ -680,25 +788,35 @@ async def _process_scenario_conversation_async(
 
     scenario_prompt = SCENARIOS[scenario_key]["prompt"]
 
-    # 2. Initialize Session if not exists
+    # 2. Determine User Input (Text vs Audio)
+    if text_input and text_input.strip():
+        # Case A: User typed text
+        user_text = text_input
+    elif audio_file:
+        # Case B: User sent audio -> Transcribe it
+        try:
+            input_audio_path = await _save_uploaded_audio_async(audio_file)
+            user_text = await asyncio.to_thread(
+                models["transcription_model"].transcribe_audio,
+                audio_file=input_audio_path,
+                language=language,
+            )
+        except Exception as e:
+            logger.error(f"Transcription failed: {e}")
+            raise ValueError("Could not transcribe audio.")
+    else:
+        raise ValueError("No input provided (text or audio required).")
+
+    if not user_text:
+        raise ValueError("Input resulted in empty text.")
+
+    # 3. Initialize Session if not exists
     if session_id not in scenario_sessions:
         scenario_sessions[session_id] = []
 
     current_history = scenario_sessions[session_id]
 
     try:
-        # 3. Save & Transcribe (Reuse existing logic)
-        input_audio_path = await _save_uploaded_audio_async(audio_file)
-
-        user_text = await asyncio.to_thread(
-            models["transcription_model"].transcribe_audio,
-            audio_file=input_audio_path,
-            language=language,
-        )
-
-        if not user_text:
-            raise ValueError("Could not transcribe audio.")
-
         # 4. Generate Response with Memory and Scenario Prompt
         bot_response = await asyncio.to_thread(
             models["language_model"].generate_response,
@@ -719,9 +837,22 @@ async def _process_scenario_conversation_async(
         if len(scenario_sessions[session_id]) > 10:
             scenario_sessions[session_id] = scenario_sessions[session_id][-10:]
 
+        # Generate a unique ID for this specific interaction
+        message_id = str(uuid.uuid4())
         # 6. Translate & TTS (Concurrent)
         audio_id = str(uuid.uuid4())
         audio_path = os.path.join(Config.AUDIO_DIR, f"{audio_id}.mp3")
+        await asyncio.to_thread(
+            audio_service.speak,
+            audio_path=audio_path,
+            text=bot_response,
+            language=language,
+        )
+
+        # FIRE AND FORGET: Schedule translation for later
+        background_tasks.add_task(
+            run_translation_task, user_text, bot_response, language, message_id
+        )
 
         results = await asyncio.gather(
             asyncio.to_thread(
@@ -739,11 +870,14 @@ async def _process_scenario_conversation_async(
         )
 
         return {
-            "transcribedText": user_text,
+            "transcribedText": user_text
+            if audio_file
+            else None,  # Only return if transcribed
             "translatedUserText": results[0],
             "botResponse": bot_response,
             "botResponseEnglish": results[1],
             "audioId": audio_id,
+            "messageId": message_id,
         }
 
     finally:
@@ -779,51 +913,19 @@ async def japanese_page(request: Request):
 
 
 @app.get(
-    "/{language}/image",
-    response_class=HTMLResponse,
-    summary="Image Game Page",
-    name="language_image",
-)
+    "/{language}/image", response_class=HTMLResponse, name="language_image"
+)  # <--- ADD THIS NAME
 async def language_image_page(request: Request, language: str):
-    """Render language-specific image recognition page."""
     if not _is_supported_language(language):
-        return templates.TemplateResponse(
-            "404.html", {"request": request}, status_code=404
-        )
+        raise HTTPException(status_code=404)
 
-    if "detector" not in models or "translator" not in models:
-        return templates.TemplateResponse(
-            "503.html", {"request": request}, status_code=503
-        )
+    # Pre-fetch a random image URL to serve
+    img_url = await _fetch_random_image_async()
 
-    try:
-        # Generate welcome message and audio (concurrently)
-        bot_response_task = asyncio.create_task(
-            asyncio.to_thread(
-                models["translator"].translate_from_english,
-                "What do you see?",
-                language,
-            )
-        )
-        img_url_task = asyncio.create_task(_fetch_random_image_async())
-
-        bot_response = await bot_response_task
-        img_url = await img_url_task
-
-        # This depends on bot_response, so it's awaited after
-        await _get_or_create_cached_audio_async(
-            f"{language}_image", bot_response, language
-        )
-
-        return templates.TemplateResponse(
-            f"{language}_image.html",
-            {"request": request, "img_file": img_url, "language": language},
-        )
-    except Exception as e:
-        logger.error(f"Error in language_image_page: {e}", exc_info=True)
-        return templates.TemplateResponse(
-            "500.html", {"request": request}, status_code=500
-        )
+    return templates.TemplateResponse(
+        f"{language}_image.html",
+        {"request": request, "img_file": img_url, "language": language},
+    )
 
 
 @app.get("/{language}/scenario", response_class=HTMLResponse)
@@ -843,27 +945,104 @@ async def scenario_page(request: Request, language: str):
 # ==============================================================================
 
 
+async def _translate_and_cache(
+    message_id: str,
+    user_text: str,
+    bot_text: str,
+    source_lang: str,
+    target_lang: str = "english",
+):
+    """
+    Background task to translate texts and cache them.
+    FIXED: Uses translate_to_english() method.
+    """
+    try:
+        logger.info(f"Starting background translation for message {message_id}")
+
+        # Run translations concurrently
+        # FIXED: Use translate_to_english instead of translate
+        results = await asyncio.gather(
+            asyncio.to_thread(
+                models["translator"].translate_to_english, user_text, source_lang
+            ),
+            asyncio.to_thread(
+                models["translator"].translate_to_english, bot_text, source_lang
+            ),
+            return_exceptions=True,  # Don't let one failure break both
+        )
+
+        # Extract results with error handling
+        user_translation = results[0]
+        bot_translation = results[1]
+
+        if isinstance(user_translation, Exception):
+            logger.error(f"Error translating user text: {user_translation}")
+            user_translation = "(Translation failed)"
+
+        if isinstance(bot_translation, Exception):
+            logger.error(f"Error translating bot text: {bot_translation}")
+            bot_translation = "(Translation failed)"
+
+        # Cache the translations
+        translation_cache[message_id] = {
+            "user_english": user_translation,
+            "bot_english": bot_translation,
+        }
+
+        logger.info(f"Translations cached for message {message_id}")
+
+    except Exception as e:
+        logger.error(
+            f"Background translation failed for message {message_id}: {e}",
+            exc_info=True,
+        )
+        # Store fallback so the frontend doesn't hang
+        translation_cache[message_id] = {
+            "user_english": "(Translation unavailable)",
+            "bot_english": "(Translation unavailable)",
+        }
+
+
 @app.post(
     "/api/text-chat",
     response_model=TextChatResponse,
     responses={503: {"model": ErrorResponse}},
     summary="Text Chat Endpoint",
 )
-async def text_chat(request: TextChatRequest):
+async def text_chat(
+    background_tasks: BackgroundTasks,
+    language: str = Form(...),
+    text: str = Form(...),  # Changed from Pydantic model to Form parameter
+    session_id: str = Form(default=""),
+):
     """Handle text-based chat API requests."""
     if "language_model" not in models or "translator" not in models:
         raise HTTPException(status_code=503, detail="Chat services are not available.")
-
-    if not _is_supported_language(request.language):
+    if not _is_supported_language(language):
         raise HTTPException(status_code=400, detail="Unsupported language")
-
-    if not request.message.strip():
+    if not text.strip():
         raise HTTPException(status_code=400, detail="Message cannot be empty")
-
     try:
-        result = await _process_text_conversation_async(
-            request.message, request.language
+        # Generate unique message ID
+        message_id = str(uuid.uuid4())
+
+        # Process the conversation
+        result = await _process_text_conversation_async(text, language)
+
+        # Add message_id to response
+        result["messageId"] = message_id
+
+        # Start background translation task
+        asyncio.create_task(
+            _translate_and_cache(
+                message_id=message_id,
+                user_text=result.get("transcribedText", ""),  # User's spoken text
+                bot_text=result.get("botResponse", ""),
+                source_lang=language,
+                target_lang="english",
+            )
         )
+
         return JSONResponse(content=result)
     except Exception as e:
         logger.error(f"Error in text_chat: {e}", exc_info=True)
@@ -880,15 +1059,30 @@ async def voice_chat(language: str = Form(...), audio: UploadFile = File(...)):
     """Handle voice-based chat API requests."""
     if "transcription_model" not in models or "language_model" not in models:
         raise HTTPException(status_code=503, detail="Voice services are not available.")
-
     if not _is_supported_language(language):
         raise HTTPException(status_code=400, detail="Unsupported language")
-
     if not audio.filename:
         raise HTTPException(status_code=400, detail="No audio file provided")
-
     try:
+        # Generate unique message ID
+        message_id = str(uuid.uuid4())
+
         result = await _process_voice_conversation_async(audio, language)
+
+        # Add message_id to response
+        result["messageId"] = message_id
+
+        # Start background translation task
+        asyncio.create_task(
+            _translate_and_cache(
+                message_id=message_id,
+                user_text=result.get("transcribedText", ""),  # User's spoken text
+                bot_text=result.get("botResponse", ""),  # Bot's response
+                source_lang=language,
+                target_lang="english",
+            )
+        )
+
         return JSONResponse(content=result)
     except Exception as e:
         logger.error(f"Error in voice_chat: {e}", exc_info=True)
@@ -909,61 +1103,128 @@ async def play_audio(
     Serve audio files by ID.
     This is the BUG FIX: It *only* serves the file.
     """
-    if not _is_valid_audio_id(audio_id):
-        raise HTTPException(status_code=400, detail="Invalid audio ID")
-
-    audio_path = os.path.join(Config.AUDIO_DIR, f"{audio_id}.mp3")
+    safe_id = "".join(x for x in audio_id if x.isalnum() or x in "_-")
+    audio_path = os.path.join(Config.AUDIO_DIR, f"{safe_id}.mp3")
 
     if not os.path.exists(audio_path):
         raise HTTPException(status_code=404, detail="Audio file not found")
-
     return FileResponse(audio_path, media_type="audio/mpeg")
 
 
-@app.post(
-    "/api/image_guess",
-    response_model=ImageGuessResponse,
-    responses={503: {"model": ErrorResponse}},
-    summary="Image Guess Endpoint",
-)
+@app.post("/api/image_guess", response_model=ImageGuessResponse)
 async def image_guess(
     language: str = Form(...),
     image_url: str = Form(...),
     audio: UploadFile = File(...),
 ):
-    """Handle image object detection based on voice input."""
-    if "detector" not in models or "transcription_model" not in models:
-        raise HTTPException(
-            status_code=503, detail="Image recognition services are unavailable."
-        )
-
-    if not _is_supported_language(language):
-        raise HTTPException(status_code=400, detail="Unsupported language")
+    if "vqa" not in models:
+        raise HTTPException(status_code=503, detail="VQA service unavailable")
 
     try:
         result = await _process_image_guess_async(audio, language, image_url)
         return JSONResponse(content=result)
     except Exception as e:
         logger.error(f"Error in image_guess: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/chat")
+async def chat_endpoint(
+    background_tasks: BackgroundTasks,
+    language: str = Form(...),
+    session_id: str = Form(default=""),
+    audio: Optional[UploadFile] = File(None),
+    text: Optional[str] = Form(None),
+):
+    """
+    Unified endpoint for chat (mirrors /api/scenario-chat structure).
+    Accepts either audio or text input via FormData.
+    """
+    try:
+        # Validate that we have at least one input
+        if not audio and not text:
+            raise HTTPException(
+                status_code=400, detail="Either audio or text is required."
+            )
+
+        # Validate language
+        if not _is_supported_language(language):
+            raise HTTPException(status_code=400, detail="Unsupported language")
+
+        # Generate unique message ID
+        message_id = str(uuid.uuid4())
+
+        # Process based on input type
+        if audio:
+            # Handle audio input
+            result = await _process_voice_conversation_async(audio, language)
+        else:
+            # Handle text input
+            result = await _process_text_conversation_async(text, language)
+
+        # Add message_id to response
+        result["messageId"] = message_id
+
+        # Determine user text for translation
+        user_text = result.get("transcribedText") if audio else text
+        bot_text = result.get("botResponse", "")
+
+        # Start background translation task
+        asyncio.create_task(
+            _translate_and_cache(
+                message_id=message_id,
+                user_text=user_text or "",
+                bot_text=bot_text,
+                source_lang=language,
+                target_lang="english",
+            )
+        )
+
+        return JSONResponse(content=result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Chat endpoint failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/scenario-chat")
 async def scenario_chat_endpoint(
+    background_tasks: BackgroundTasks,
     language: str = Form(...),
     scenario: str = Form(...),
     session_id: str = Form(...),
-    audio: UploadFile = File(...),
+    audio: Optional[UploadFile] = File(None),  # Changed to Optional, default None
+    text: Optional[str] = Form(None),  # Added Optional Text
 ):
     """Endpoint for scenario-based roleplay."""
     try:
+        # Validate that we have at least one input
+        if not audio and not text:
+            raise HTTPException(
+                status_code=400, detail="Either audio or text is required."
+            )
+
         result = await _process_scenario_conversation_async(
-            audio, language, scenario, session_id
+            audio_file=audio,
+            text_input=text,
+            language=language,
+            scenario_key=scenario,
+            session_id=session_id,
+            background_tasks=background_tasks,
         )
         return JSONResponse(content=result)
     except Exception as e:
         logger.error(f"Scenario chat failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/translation/{message_id}")
+async def get_translation(message_id: str):
+    if message_id in translation_cache:
+        return JSONResponse(translation_cache[message_id])
+    return JSONResponse({"status": "pending"}, status_code=202)
 
 
 @app.post("/api/reset-session")

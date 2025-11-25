@@ -1,357 +1,291 @@
-document.addEventListener('DOMContentLoaded', function() {
-    const chatMessages = document.getElementById('chatMessages');
-    const userInput = document.getElementById('userInput');
-    const sendButton = document.getElementById('sendButton');
-    const recordButton = document.getElementById('recordButton');
-    const recordingStatus = document.getElementById('recordingStatus');
-    
-    let mediaRecorder;
-    let audioChunks = [];
-    let isRecording = false;
+const sessionId = crypto.randomUUID();
+const language = "chinese";
 
-    // --- 1. Global Audio Player (The Fix) ---
-    // We use a single global audio object. We "bless" (load) this object
-    // immediately whenever the user clicks a button.
-    const globalAudioPlayer = new Audio();
+// DOM Elements
+const recordButton = document.getElementById('recordButton');
+const recordingStatus = document.getElementById('recordingStatus');
+const chatMessages = document.getElementById('chatMessages');
+const userInput = document.getElementById('userInput');
+const sendButton = document.getElementById('sendButton');
 
-    // --- 2. UI Helper Functions ---
+// Create audio player with iOS/Safari-compatible settings
+let audioPlayer = document.getElementById('audioPlayer');
+if (!audioPlayer) {
+    audioPlayer = document.createElement('audio');
+    audioPlayer.id = 'audioPlayer';
+    audioPlayer.style.display = 'none';
+    audioPlayer.preload = 'auto';
+    audioPlayer.playsInline = true; // CRITICAL for iOS
+    document.body.appendChild(audioPlayer);
+}
 
-    function scrollToBottom() {
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-    }
+let mediaRecorder;
+let audioChunks = [];
+let isRecording = false;
+let audioInitialized = false;
 
-    function playAudio(audioId) {
-        const audioUrl = `/api/audio/${audioId}`;
-        
-        // Reset the player
-        globalAudioPlayer.pause();
-        globalAudioPlayer.currentTime = 0;
-        globalAudioPlayer.src = audioUrl;
-        
-        // Attempt to play with a retry mechanism (in case file system is slow)
-        const attemptPlay = (retries = 3) => {
-            globalAudioPlayer.play().catch(error => {
-                if (error.name === 'NotAllowedError') {
-                    console.error("Autoplay blocked. Browser lost user gesture context.");
-                    recordingStatus.textContent = "⚠️ Click 'Play' in chat (Autoplay blocked)";
-                } else if (retries > 0) {
-                    // Retry if file not ready (404)
-                    setTimeout(() => attemptPlay(retries - 1), 500);
-                } else {
-                    console.error('Audio playback error:', error);
-                }
-            });
-        };
-        
-        attemptPlay();
-    }
-
-    function addUserMessage(originalText, translatedText) {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'message user-message';
-        
-        // Add original text
-        const textDiv = document.createElement('div');
-        textDiv.textContent = originalText;
-        messageDiv.appendChild(textDiv);
-        
-        // Add translation if available
-        if (translatedText) {
-            const translationDiv = document.createElement('div');
-            translationDiv.className = 'translation';
-            translationDiv.textContent = translatedText;
-            messageDiv.appendChild(translationDiv);
-        }
-        
-        chatMessages.appendChild(messageDiv);
-        scrollToBottom();
-    }
-
-    function addBotMessage(originalText, translatedText, audioId) {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = 'message bot-message';
-        
-        // Add original text
-        const textDiv = document.createElement('div');
-        textDiv.textContent = originalText;
-        messageDiv.appendChild(textDiv);
-        
-        // Add response sections
-        const responseSection = document.createElement('div');
-        responseSection.className = 'response-section';
-        
-        // Add translation if available
-        if (translatedText) {
-            const translationSpan = document.createElement('div');
-            translationSpan.className = 'translation';
-            translationSpan.innerHTML = `<span class="response-label">En:</span> ${translatedText}`;
-            responseSection.appendChild(translationSpan);
-        }
-        
-        // Add play button for audio if available
-        if (audioId) {
-            const playButton = document.createElement('button');
-            playButton.className = 'play-audio';
-            playButton.innerHTML = '🔊 Play';
-            // This click will always work because it is a direct user action
-            playButton.onclick = function() { playAudio(audioId); };
-            responseSection.appendChild(playButton);
-        }
-        
-        messageDiv.appendChild(responseSection);
-        chatMessages.appendChild(messageDiv);
-        scrollToBottom();
-    }
-
-    // --- 3. Text Chat Logic ---
-
-    async function sendTextMessage() {
-        const message = userInput.value.trim();
-        if (message === '') return;
-        
-        // 1. BLESS THE AUDIO: User clicked send, so we prep the player immediately
-        globalAudioPlayer.src = '';
-        globalAudioPlayer.load();
-        
-        userInput.value = '';
-        recordingStatus.textContent = "Thinking...";
-        
+// Initialize audio on first user interaction (required for iOS/Safari)
+async function initializeAudio() {
+    if (!audioInitialized) {
         try {
-            const language = window.location.pathname.includes('chinese') ? 'chinese' : 'japanese';
+            // Play silent audio to unlock audio playback on iOS
+            const silentAudio = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAACAAABhADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1f////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAYYSAAAAAAAD/+xDEAAADSAZQAMYQnCu/ioB4AgwACAIAkAgQJH//////////8+r//////////+r/////////4gMEAMMw4EBAMEwwGBA2GQwIBgUDhMKCA4PDI0Pgg8Qjw8NCwoDAwKCA4HAwKCQgKCAoIAwMAQABgEAgEBA//sQxAoAAxkGUADGEJ4rv///f/////+v/////////v//////////8EAQBAwGBwKBAMCAYDAgEBAECAICBAMDAQEAQBAICAQDAgEBAH/+xDEFAAC+QpSAMYQrCu////////+v/////////v//////////4QBAEAwKBAQBgMCAYEAgEBAMCAYFAYEAwGBAMCAQDAgEBAE//7EMQZAITCC6AAZiAAADSAAAAAEQBAH//////////////////////////////////////////';
             
-            const response = await fetch('/api/text-chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    message: message,
-                    language: language
-                })
-            });
-            
-            if (!response.ok) throw new Error('Network response was not ok');
-            
-            const data = await response.json();
-            
-            addUserMessage(message, data.translatedUserText);
-            addBotMessage(data.botResponse, data.botResponseEnglish, data.audioId);
-            
-            if (data.audioId) {
-                playAudio(data.audioId);
-            }
-            
-            recordingStatus.textContent = "Ready";
-            
-        } catch (error) {
-            console.error('Error:', error);
-            recordingStatus.textContent = "Error, please try again";
+            audioPlayer.src = silentAudio;
+            audioPlayer.volume = 0;
+            await audioPlayer.play();
+            audioPlayer.pause();
+            audioPlayer.volume = 1;
+            audioInitialized = true;
+            console.log('Audio initialized successfully');
+        } catch (err) {
+            console.log('Audio initialization deferred:', err);
+            // Don't throw - user can still try to use the app
         }
     }
+}
 
-    // --- 4. Voice Recording Logic ---
+// Audio Recording Logic
+recordButton.addEventListener('click', async () => {
+    // Initialize audio on first click
+    await initializeAudio();
+    
+    if (!isRecording) {
+        startRecording();
+    } else {
+        stopRecording();
+    }
+});
 
-    async function toggleRecording() {
-        const sampleRate = 44100;
-        const numChannels = 1;
+async function startRecording() {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+        audioChunks = [];
+
+        mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
+        mediaRecorder.onstop = sendAudio;
+
+        mediaRecorder.start();
+        isRecording = true;
+        recordButton.classList.add('recording');
+        recordButton.querySelector('.button-text').textContent = '停止';
+        recordingStatus.textContent = '正在录音...';
+    } catch (err) {
+        alert('无法访问麦克风');
+        console.error('Microphone error:', err);
+    }
+}
+
+function stopRecording() {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+        mediaRecorder.stream.getTracks().forEach(track => track.stop());
+    }
+    isRecording = false;
+    recordButton.classList.remove('recording');
+    recordButton.querySelector('.button-text').textContent = '按下开始录音';
+    recordingStatus.textContent = '处理中...';
+}
+
+// Sending Logic
+async function sendAudio() {
+    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+    const formData = new FormData();
+    formData.append('audio', audioBlob, 'input.wav');
+    formData.append('language', language);
+    formData.append('session_id', sessionId);
+    
+    await processResponse(formData);
+}
+
+async function sendText() {
+    const text = userInput.value.trim();
+    if (!text) return;
+
+    // Initialize audio on first send (in case user types before clicking record)
+    await initializeAudio();
+
+    // Add user message to UI immediately
+    addMessage('您', text, null, true, null, null);
+    userInput.value = '';
+
+    const formData = new FormData();
+    formData.append('text', text);
+    formData.append('language', language);
+    formData.append('session_id', sessionId);
+
+    await processResponse(formData);
+}
+
+async function processResponse(formData) {
+    try {
+        recordingStatus.textContent = '思考中...';
         
-        if (!isRecording) {
-            // --- START RECORDING ---
-            audioChunks = [];
-            
+        const response = await fetch('/api/chat', {
+            method: 'POST',
+            body: formData
+        });
+
+        if (!response.ok) {
+            throw new Error(`Server error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+
+        // Handle transcribed text (from audio input)
+        if (data.transcribedText) {
+            addMessage('您', data.transcribedText, null, true, data.messageId, 'user_english');
+        }
+
+        // Handle bot response
+        if (data.botResponse) {
+            addMessage('助手', data.botResponse, null, false, data.messageId, 'bot_english');
+        }
+
+        // Play audio if available - FIXED FOR SAFARI/iOS
+        if (data.audioId) {
             try {
-                // HTTPS check
-                if (location.protocol !== 'https:' && location.hostname !== 'localhost') {
-                    alert('HTTPS is required for microphone access.');
+                // Set the source
+                audioPlayer.src = `/api/audio/${data.audioId}`;
+                
+                // Explicitly load the audio
+                audioPlayer.load();
+                
+                // Small delay to ensure load starts (helps on slower connections)
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // Attempt to play
+                const playPromise = audioPlayer.play();
+                
+                if (playPromise !== undefined) {
+                    await playPromise;
+                    console.log('Audio playing successfully');
+                }
+            } catch (err) {
+                console.error('Audio play error:', err);
+                
+                // Show user-friendly message for autoplay restrictions
+                if (err.name === 'NotAllowedError' || err.name === 'NotSupportedError') {
+                    recordingStatus.textContent = '音频已准备好（点击任意按钮启用）';
+                    
+                    // Try to play again on next user interaction
+                    const retryPlay = async () => {
+                        try {
+                            await audioPlayer.play();
+                            document.removeEventListener('click', retryPlay);
+                            document.removeEventListener('touchstart', retryPlay);
+                        } catch (e) {
+                            console.log('Retry play failed:', e);
+                        }
+                    };
+                    
+                    // Add listeners for next interaction
+                    document.addEventListener('click', retryPlay, { once: true });
+                    document.addEventListener('touchstart', retryPlay, { once: true });
+                }
+            }
+        }
+        
+    } catch (e) {
+        console.error('Chat error:', e);
+        addMessage('系统', '抱歉，出现错误。请重试。', null, false, null, null);
+    } finally {
+        recordingStatus.textContent = '准备就绪';
+    }
+}
+
+// Add message with spoiler translation support
+function addMessage(role, text, initialTranslation, isUser, messageId, jsonKey) {
+    const messageBubble = document.createElement('div');
+    messageBubble.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
+
+    // Main message text
+    const textDiv = document.createElement('div');
+    textDiv.className = 'message-text';
+    textDiv.textContent = text;
+    messageBubble.appendChild(textDiv);
+
+    // Only add translation spoiler if we have a messageId
+    if (messageId && jsonKey) {
+        const transDiv = document.createElement('div');
+        transDiv.className = 'spoiler-hidden';
+        transDiv.textContent = initialTranslation || 'Click to reveal translation';
+        
+        transDiv.onclick = async () => {
+            // Already visible? Do nothing
+            if (transDiv.classList.contains('spoiler-visible')) return;
+
+            // Fetch translation if not already loaded
+            if (!initialTranslation) {
+                transDiv.textContent = 'Loading...';
+                transDiv.style.color = '#999'; // Make "Loading..." visible
+                
+                try {
+                    const translation = await fetchTranslationWithRetry(messageId, jsonKey);
+                    transDiv.textContent = translation;
+                    initialTranslation = translation;
+                } catch (err) {
+                    console.error('Translation error:', err);
+                    transDiv.textContent = 'Translation unavailable';
+                    transDiv.classList.remove('spoiler-hidden');
+                    transDiv.classList.add('spoiler-visible');
                     return;
                 }
-                
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    audio: { 
-                        sampleRate: sampleRate,
-                        channelCount: numChannels,
-                        echoCancellation: true,
-                        noiseSuppression: true
-                    } 
-                });
-                
-                // Browser compatibility check
-                let mimeType = 'audio/webm';
-                if (MediaRecorder.isTypeSupported('audio/mp4')) {
-                    mimeType = 'audio/mp4'; // Safari
-                } else if (!MediaRecorder.isTypeSupported('audio/webm')) {
-                    mimeType = ''; // Default
-                }
-                
-                mediaRecorder = new MediaRecorder(stream, 
-                    mimeType ? { mimeType, audioBitsPerSecond: 128000 } : {}
-                );
-                
-                mediaRecorder.ondataavailable = (event) => {
-                    if (event.data.size > 0) {
-                        audioChunks.push(event.data);
-                    }
-                };
-                
-                mediaRecorder.onstop = async () => {
-                    recordingStatus.textContent = "Processing...";
-                    
-                    const audioBlob = new Blob(audioChunks, { type: mimeType || 'audio/webm' });
-                    
-                    try {
-                        // Convert to WAV (Keep existing logic for compatibility)
-                        const wavBlob = await convertToWav(audioBlob, sampleRate, numChannels);
-                        
-                        const formData = new FormData();
-                        formData.append('audio', wavBlob, 'recording.wav');
-                        formData.append('language', window.location.pathname.includes('chinese') ? 'chinese' : 'japanese');
-                        
-                        const response = await fetch('/api/voice-chat', {
-                            method: 'POST',
-                            body: formData
-                        });
-                        
-                        if (!response.ok) throw new Error('Server error: ' + response.status);
-                        
-                        const data = await response.json();
-                        
-                        addUserMessage(data.transcribedText, data.translatedUserText);
-                        addBotMessage(data.botResponse, data.botResponseEnglish, data.audioId);
-                        
-                        if (data.audioId) {
-                            playAudio(data.audioId);
-                        }
-                        
-                        recordingStatus.textContent = "Ready";
-                        
-                    } catch (error) {
-                        console.error('Processing error:', error);
-                        recordingStatus.textContent = "Processing failed";
-                    }
-                };
-                
-                mediaRecorder.onerror = (event) => {
-                    console.error('MediaRecorder error:', event.error);
-                    recordingStatus.textContent = "Recording Error";
-                    isRecording = false;
-                    recordButton.classList.remove('recording');
-                    recordButton.querySelector('.button-text').textContent = "Start Recording";
-                };
-                
-                mediaRecorder.start(1000);
-                isRecording = true;
-                
-                recordButton.classList.add('recording');
-                recordButton.querySelector('.button-text').textContent = "Stop Recording";
-                recordingStatus.textContent = "Recording...";
-                
-            } catch (error) {
-                console.error('Microphone access error:', error);
-                alert("Microphone access denied or not found.");
-                recordingStatus.textContent = "Ready";
             }
-            
-        } else {
-            // --- STOP RECORDING ---
-            
-            // 1. BLESS THE AUDIO: This is the critical fix for Voice.
-            // The user just clicked "Stop", so we use this gesture to unlock audio.
-            globalAudioPlayer.src = '';
-            globalAudioPlayer.load();
 
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                mediaRecorder.stop();
-                isRecording = false;
-                
-                // Stop tracks
-                mediaRecorder.stream.getTracks().forEach(track => track.stop());
-                
-                recordButton.classList.remove('recording');
-                recordButton.querySelector('.button-text').textContent = "Start Recording";
-                recordingStatus.textContent = "Processing...";
-            }
-        }
+            // Reveal translation
+            transDiv.classList.remove('spoiler-hidden');
+            transDiv.classList.add('spoiler-visible');
+        };
+
+        messageBubble.appendChild(transDiv);
     }
 
-    // --- 5. WAV Conversion Helpers (Unchanged) ---
+    chatMessages.appendChild(messageBubble);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
 
-    async function convertToWav(audioBlob, sampleRate, numChannels) {
-        try {
-            const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-            const audioContext = new AudioContextClass({ sampleRate });
-            const arrayBuffer = await audioBlob.arrayBuffer();
-            const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-            const wavBuffer = createWavFile(audioBuffer, numChannels);
-            audioContext.close();
-            return new Blob([wavBuffer], { type: 'audio/wav' });
-        } catch (error) {
-            console.error('WAV conversion error:', error);
-            throw new Error('Audio conversion failed');
-        }
+// Fetch translation with retry logic
+async function fetchTranslationWithRetry(messageId, key, attempts = 0) {
+    const maxAttempts = 6;
+    
+    if (attempts >= maxAttempts) {
+        throw new Error('Translation timeout');
     }
 
-    function createWavFile(audioBuffer, numChannels) {
-        const length = audioBuffer.length;
-        const sampleRate = audioBuffer.sampleRate;
-        const bitsPerSample = 16;
-        const bytesPerSample = bitsPerSample / 8;
-        const blockAlign = numChannels * bytesPerSample;
-        const byteRate = sampleRate * blockAlign;
-        const dataSize = length * blockAlign;
+    try {
+        const res = await fetch(`/api/translation/${messageId}`);
         
-        const buffer = new ArrayBuffer(44 + dataSize);
-        const view = new DataView(buffer);
-        
-        writeString(view, 0, 'RIFF');
-        view.setUint32(4, 36 + dataSize, true);
-        writeString(view, 8, 'WAVE');
-        writeString(view, 12, 'fmt ');
-        view.setUint32(16, 16, true); 
-        view.setUint16(20, 1, true); 
-        view.setUint16(22, numChannels, true);
-        view.setUint32(24, sampleRate, true);
-        view.setUint32(28, byteRate, true);
-        view.setUint16(32, blockAlign, true);
-        view.setUint16(34, bitsPerSample, true);
-        writeString(view, 36, 'data');
-        view.setUint32(40, dataSize, true);
-        
-        const floatData = audioBuffer.getChannelData(0);
-        let offset = 44;
-        
-        for (let i = 0; i < length; i++) {
-            const sample = Math.max(-1, Math.min(1, floatData[i]));
-            const pcm = sample < 0 ? sample * 32768 : sample * 32767;
-            view.setInt16(offset, pcm, true);
-            offset += bytesPerSample;
+        if (res.status === 202) {
+            // Still pending, wait and retry
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return fetchTranslationWithRetry(messageId, key, attempts + 1);
         }
         
-        return buffer;
-    }
-
-    function writeString(view, offset, string) {
-        for (let i = 0; i < string.length; i++) {
-            view.setUint8(offset + i, string.charCodeAt(i));
+        if (!res.ok) {
+            throw new Error(`HTTP ${res.status}`);
         }
+        
+        const data = await res.json();
+        return data[key] || 'Translation not found';
+        
+    } catch (err) {
+        console.error(`Translation fetch attempt ${attempts + 1} failed:`, err);
+        
+        if (attempts < maxAttempts - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return fetchTranslationWithRetry(messageId, key, attempts + 1);
+        }
+        
+        throw err;
     }
+}
 
-    // --- 6. Event Listeners ---
-
-    if (recordButton) {
-        recordButton.addEventListener('click', toggleRecording);
-    } else {
-        console.error("Record button not found in DOM");
-    }
-
-    if (sendButton) {
-        sendButton.addEventListener('click', sendTextMessage);
-    }
-
-    if (userInput) {
-        userInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                sendTextMessage();
-            }
-        });
+// Event Listeners for Text Input
+sendButton.addEventListener('click', sendText);
+userInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') {
+        sendText();
     }
 });

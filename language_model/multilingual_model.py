@@ -263,7 +263,7 @@ class MultilingualModel:
             final_system_prompt = (
                 f"{system_prompt_override} "
                 f"IMPORTANT: Respond ONLY in {target_language}. "
-                f"Keep responses concise (under 2 sentences) to keep the conversation moving."
+                f"Keep responses short, under 2 sentences."
             )
         else:
             # Default prompt

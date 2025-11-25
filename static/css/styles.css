@@ -856,3 +856,69 @@ footer {
         font-size: 0.8rem;
     }
 }
+/* Container for the translation */
+.translation-container {
+    margin-top: 5px;
+    font-size: 0.9em;
+    color: #666;
+    cursor: pointer; /* Interaction hint */
+    transition: all 0.3s ease;
+}
+
+/* The "Hidden" State - Your original CSS with enhancements */
+.spoiler-hidden {
+    background-color: #e0e0e0; /* Gray box */
+    color: transparent;        /* Hide text */
+    text-shadow: 0 0 8px rgba(0,0,0,0.5); /* Blur effect */
+    border-radius: 4px;
+    padding: 2px 8px;
+    user-select: none; /* Prevent cheating by highlighting */
+    cursor: pointer; /* Show it's clickable */
+    display: inline-block; /* Better layout */
+    margin-top: 6px; /* Space from main message */
+    font-size: 0.85em; /* Slightly smaller */
+    font-style: italic; /* Visual distinction */
+    transition: background-color 0.2s ease; /* Smooth hover */
+}
+
+/* Optional: Add a 'Reveal' label on hover - Your original CSS */
+.spoiler-hidden:hover {
+    background-color: #d0d0d0;
+    box-shadow: inset 0 0 5px rgba(0,0,0,0.1);
+}
+
+/* The "Revealed" State - Your original CSS with enhancements */
+.spoiler-visible {
+    color: #888;
+    background-color: transparent;
+    text-shadow: none;
+    cursor: default; /* No longer clickable */
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-top: 6px;
+    font-size: 0.85em;
+    font-style: italic;
+    display: inline-block;
+    transition: all 0.3s ease; /* Smooth reveal */
+}
+
+/* Different colors for user vs bot messages */
+.user-message .spoiler-visible {
+    color: rgba(255, 255, 255, 0.75); /* Lighter for dark backgrounds */
+}
+
+.bot-message .spoiler-visible {
+    color: #666; /* Darker for light backgrounds */
+}
+
+/* Ensure messages are laid out correctly */
+.message {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 12px;
+}
+
+.message-text {
+    /* Main message text styling */
+    line-height: 1.5;
+}
