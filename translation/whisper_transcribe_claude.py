@@ -34,7 +34,7 @@ class SpeechTranscriber:
         "medium": "openai/whisper-medium",  # ~769M params, high accuracy
     }
 
-    def __init__(self, model_size: str = "base", use_faster_whisper: bool = True):
+    def __init__(self, model_size: str = "small", use_faster_whisper: bool = True):
         """
         Initialize the Whisper transcription pipeline.
 

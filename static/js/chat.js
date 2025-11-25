@@ -1,5 +1,82 @@
 const sessionId = crypto.randomUUID();
-const language = "chinese";
+
+// Automatically detect language from page
+let language = "chinese"; // default fallback
+
+// Try to detect language from multiple sources
+function detectLanguage() {
+    // Method 1: Check for data attribute on body or container
+    const body = document.body;
+    if (body.dataset.language) {
+        return body.dataset.language;
+    }
+    
+    // Method 2: Check for language in container div
+    const container = document.querySelector('.chat-container');
+    if (container && container.dataset.language) {
+        return container.dataset.language;
+    }
+    
+    // Method 3: Check HTML lang attribute
+    const htmlLang = document.documentElement.lang;
+    if (htmlLang) {
+        if (htmlLang.startsWith('zh')) return 'chinese';
+        if (htmlLang.startsWith('ja')) return 'japanese';
+    }
+    
+    // Method 4: Check page title or header for language indicators
+    const title = document.title.toLowerCase();
+    if (title.includes('chinese') || title.includes('中文')) return 'chinese';
+    if (title.includes('japanese') || title.includes('日本語')) return 'japanese';
+    
+    // Method 5: Check for language-specific class on chat-header
+    const chatHeader = document.querySelector('.chat-header');
+    if (chatHeader) {
+        if (chatHeader.classList.contains('chinese')) return 'chinese';
+        if (chatHeader.classList.contains('japanese')) return 'japanese';
+    }
+    
+    // Default fallback
+    return 'chinese';
+}
+
+language = detectLanguage();
+console.log(`Detected language: ${language}`);
+
+// Language-specific text configurations
+const languageConfig = {
+    chinese: {
+        recording: '正在录音...',
+        processing: '处理中...',
+        thinking: '思考中...',
+        ready: '准备就绪',
+        stop: '停止',
+        startRecording: '按下开始录音',
+        audioReady: '音频已准备好（点击任意按钮启用）',
+        error: '抱歉，出现错误。请重试。',
+        micError: '无法访问麦克风',
+        you: '您',
+        assistant: '助手',
+        system: '系统'
+    },
+    japanese: {
+        recording: '録音中...',
+        processing: '処理中...',
+        thinking: '考え中...',
+        ready: '準備完了',
+        stop: '停止',
+        startRecording: '録音を開始',
+        audioReady: 'オーディオ準備完了（ボタンをクリックして有効化）',
+        error: '申し訳ございません。エラーが発生しました。もう一度お試しください。',
+        micError: 'マイクにアクセスできません',
+        you: 'あなた',
+        assistant: 'アシスタント',
+        system: 'システム'
+    }
+};
+
+// Get current language text
+const getText = (key) => languageConfig[language][key] || languageConfig.chinese[key];
 
 // DOM Elements
 const recordButton = document.getElementById('recordButton');
@@ -14,42 +91,15 @@ if (!audioPlayer) {
     audioPlayer = document.createElement('audio');
     audioPlayer.id = 'audioPlayer';
     audioPlayer.style.display = 'none';
-    audioPlayer.preload = 'auto';
-    audioPlayer.playsInline = true; // CRITICAL for iOS
     document.body.appendChild(audioPlayer);
 }
 
 let mediaRecorder;
 let audioChunks = [];
 let isRecording = false;
-let audioInitialized = false;
-
-// Initialize audio on first user interaction (required for iOS/Safari)
-async function initializeAudio() {
-    if (!audioInitialized) {
-        try {
-            // Play silent audio to unlock audio playback on iOS
-            const silentAudio = 'data:audio/mp3;base64,SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//tQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAASW5mbwAAAA8AAAACAAABhADAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1dXV1f////////////////////////////////8AAAAATGF2YzU4LjEzAAAAAAAAAAAAAAAAJAAAAAAAAAAAYYSAAAAAAAD/+xDEAAADSAZQAMYQnCu/ioB4AgwACAIAkAgQJH//////////8+r//////////+r/////////4gMEAMMw4EBAMEwwGBA2GQwIBgUDhMKCA4PDI0Pgg8Qjw8NCwoDAwKCA4HAwKCQgKCAoIAwMAQABgEAgEBA//sQxAoAAxkGUADGEJ4rv///f/////+v/////////v//////////8EAQBAwGBwKBAMCAYDAgEBAECAICBAMDAQEAQBAICAQDAgEBAH/+xDEFAAC+QpSAMYQrCu////////+v/////////v//////////4QBAEAwKBAQBgMCAYEAgEBAMCAYFAYEAwGBAMCAQDAgEBAE//7EMQZAITCC6AAZiAAADSAAAAAEQBAH//////////////////////////////////////////';
-            
-            audioPlayer.src = silentAudio;
-            audioPlayer.volume = 0;
-            await audioPlayer.play();
-            audioPlayer.pause();
-            audioPlayer.volume = 1;
-            audioInitialized = true;
-            console.log('Audio initialized successfully');
-        } catch (err) {
-            console.log('Audio initialization deferred:', err);
-            // Don't throw - user can still try to use the app
-        }
-    }
-}
 
 // Audio Recording Logic
 recordButton.addEventListener('click', async () => {
-    // Initialize audio on first click
-    await initializeAudio();
-    
     if (!isRecording) {
         startRecording();
     } else {
@@ -69,10 +119,10 @@ async function startRecording() {
         mediaRecorder.start();
         isRecording = true;
         recordButton.classList.add('recording');
-        recordButton.querySelector('.button-text').textContent = '停止';
-        recordingStatus.textContent = '正在录音...';
+        recordButton.querySelector('.button-text').textContent = getText('stop');
+        recordingStatus.textContent = getText('recording');
     } catch (err) {
-        alert('无法访问麦克风');
+        alert(getText('micError'));
         console.error('Microphone error:', err);
     }
 }
@@ -84,8 +134,8 @@ function stopRecording() {
     }
     isRecording = false;
     recordButton.classList.remove('recording');
-    recordButton.querySelector('.button-text').textContent = '按下开始录音';
-    recordingStatus.textContent = '处理中...';
+    recordButton.querySelector('.button-text').textContent = getText('startRecording');
+    recordingStatus.textContent = getText('processing');
 }
 
 // Sending Logic
@@ -103,11 +153,8 @@ async function sendText() {
     const text = userInput.value.trim();
     if (!text) return;
 
-    // Initialize audio on first send (in case user types before clicking record)
-    await initializeAudio();
-
     // Add user message to UI immediately
-    addMessage('您', text, null, true, null, null);
+    addMessage(getText('you'), text, null, true, null, null);
     userInput.value = '';
 
     const formData = new FormData();
@@ -120,7 +167,7 @@ async function sendText() {
 
 async function processResponse(formData) {
     try {
-        recordingStatus.textContent = '思考中...';
+        recordingStatus.textContent = getText('thinking');
         
         const response = await fetch('/api/chat', {
             method: 'POST',
@@ -135,63 +182,25 @@ async function processResponse(formData) {
 
         // Handle transcribed text (from audio input)
         if (data.transcribedText) {
-            addMessage('您', data.transcribedText, null, true, data.messageId, 'user_english');
+            addMessage(getText('you'), data.transcribedText, null, true, data.messageId, 'user_english');
         }
 
         // Handle bot response
         if (data.botResponse) {
-            addMessage('助手', data.botResponse, null, false, data.messageId, 'bot_english');
+            addMessage(getText('assistant'), data.botResponse, null, false, data.messageId, 'bot_english');
         }
 
-        // Play audio if available - FIXED FOR SAFARI/iOS
+        // Play audio if available - SIMPLE APPROACH (matches scenario pages)
         if (data.audioId) {
-            try {
-                // Set the source
-                audioPlayer.src = `/api/audio/${data.audioId}`;
-                
-                // Explicitly load the audio
-                audioPlayer.load();
-                
-                // Small delay to ensure load starts (helps on slower connections)
-                await new Promise(resolve => setTimeout(resolve, 100));
-                
-                // Attempt to play
-                const playPromise = audioPlayer.play();
-                
-                if (playPromise !== undefined) {
-                    await playPromise;
-                    console.log('Audio playing successfully');
-                }
-            } catch (err) {
-                console.error('Audio play error:', err);
-                
-                // Show user-friendly message for autoplay restrictions
-                if (err.name === 'NotAllowedError' || err.name === 'NotSupportedError') {
-                    recordingStatus.textContent = '音频已准备好（点击任意按钮启用）';
-                    
-                    // Try to play again on next user interaction
-                    const retryPlay = async () => {
-                        try {
-                            await audioPlayer.play();
-                            document.removeEventListener('click', retryPlay);
-                            document.removeEventListener('touchstart', retryPlay);
-                        } catch (e) {
-                            console.log('Retry play failed:', e);
-                        }
-                    };
-                    
-                    // Add listeners for next interaction
-                    document.addEventListener('click', retryPlay, { once: true });
-                    document.addEventListener('touchstart', retryPlay, { once: true });
-                }
-            }
+            audioPlayer.src = `/api/audio/${data.audioId}`;
+            audioPlayer.play().catch(err => console.error('Audio play error:', err));
         }
         
     } catch (e) {
         console.error('Chat error:', e);
-        addMessage('系统', '抱歉，出现错误。请重试。', null, false, null, null);
+        addMessage(getText('system'), getText('error'), null, false, null, null);
     } finally {
-        recordingStatus.textContent = '准备就绪';
+        recordingStatus.textContent = getText('ready');
     }
 }
 

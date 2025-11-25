@@ -275,18 +275,18 @@ async def lifespan(app: FastAPI):
     # 2. Load Models (Independently!)
 
     # --- Load VQA Service ---
-    try:
+    # try:
 
-        def _load_vqa():
-            service = VQAService()
-            service.load_model()
-            return service
+    #     def _load_vqa():
+    #         service = VQAService()
+    #         service.load_model()
+    #         return service
 
-        logger.info("Loading VQA Service (Phi-3-Vision)...")
-        models["vqa"] = await asyncio.to_thread(_load_vqa)
-    except Exception as e:
-        logger.error(f"❌ VQA Service FAILED to load: {e}")
-        # We do NOT raise here, so the app continues loading other models
+    #     logger.info("Loading VQA Service (Phi-3-Vision)...")
+    #     models["vqa"] = await asyncio.to_thread(_load_vqa)
+    # except Exception as e:
+    #     logger.error(f"❌ VQA Service FAILED to load: {e}")
+    #     # We do NOT raise here, so the app continues loading other models
 
     # --- Load Language Model ---
     try:
