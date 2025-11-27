@@ -1,21 +1,25 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="ja" data-chat-language="japanese">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>日本語対話アシスタント | Japanese Chat Assistant</title>
     <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="icon" type="image/png" href="/static/favicon/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/static/favicon/favicon.svg" />
+    <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon/apple-touch-icon.png" />
 </head>
-<body>
+<body data-language="japanese">
     <div class="container">
         <header>
             <h1>語学学習アシスタント</h1>
-            <a href="{{ url_for('home') }}" class="home-link">
+            <a href="/" class="home-link">
                 <span>← ホームに戻る</span>
             </a>
         </header>
         
-        <div class="chat-container japanese-theme">
+        <div class="chat-container japanese-theme" data-language="japanese">
             <div class="chat-header japanese">
                 <div class="icon japanese">日</div>
                 <h2>日本語対話アシスタント</h2>
@@ -29,11 +33,11 @@
             
             <div class="input-area">
                 <div class="voice-input-container">
-                    <button id="recordButton" class="record-button">
+                    <button id="recordButton" class="record-button" aria-label="Record audio">
                         <span class="mic-icon">🎤</span>
-                        <span class="button-text">クリックして録音開始</span>
+                        <span class="button-text">録音を開始</span>
                     </button>
-                    <div class="recording-status" id="recordingStatus">準備ができて</div>
+                    <div class="recording-status" id="recordingStatus">準備完了</div>
                 </div>
                 
                 <div class="chat-input-container">
@@ -47,6 +51,9 @@
             <p>Powered by Python NLP</p>
         </footer>
     </div>
+    
+    <!-- Audio player - must exist before script loads -->
+    <audio id="audioPlayer" preload="none" playsinline></audio>
     
     <script src="/static/js/chat.js"></script>
 </body>

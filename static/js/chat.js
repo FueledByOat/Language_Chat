@@ -5,7 +5,7 @@ let language = "chinese"; // default fallback
 
 // Try to detect language from multiple sources
 function detectLanguage() {
-    // Method 1: Check for data attribute on body or container
+    // Method 1: Check for data attribute on body
     const body = document.body;
     if (body.dataset.language) {
         return body.dataset.language;
@@ -24,12 +24,16 @@ function detectLanguage() {
         if (htmlLang.startsWith('ja')) return 'japanese';
     }
     
-    // Method 4: Check page title or header for language indicators
+    // Method 4: Check HTML data-chat-language attribute
+    const chatLang = document.documentElement.dataset.chatLanguage;
+    if (chatLang) return chatLang;
+    
+    // Method 5: Check page title or header for language indicators
     const title = document.title.toLowerCase();
     if (title.includes('chinese') || title.includes('中文')) return 'chinese';
     if (title.includes('japanese') || title.includes('日本語')) return 'japanese';
     
-    // Method 5: Check for language-specific class on chat-header
+    // Method 6: Check for language-specific class on chat-header
     const chatHeader = document.querySelector('.chat-header');
     if (chatHeader) {
         if (chatHeader.classList.contains('chinese')) return 'chinese';
@@ -85,23 +89,53 @@ const chatMessages = document.getElementById('chatMessages');
 const userInput = document.getElementById('userInput');
 const sendButton = document.getElementById('sendButton');
 
-// Create audio player with iOS/Safari-compatible settings
+// Get or create audio player with proper settings for iOS/Safari
 let audioPlayer = document.getElementById('audioPlayer');
 if (!audioPlayer) {
     audioPlayer = document.createElement('audio');
     audioPlayer.id = 'audioPlayer';
-    audioPlayer.style.display = 'none';
     document.body.appendChild(audioPlayer);
+}
+
+// Ensure audio player has correct attributes
+audioPlayer.preload = 'none';
+audioPlayer.setAttribute('playsinline', ''); // Critical for iOS
+audioPlayer.style.display = 'none';
+
+// Track if user has interacted (required for iOS autoplay)
+let userHasInteracted = false;
+
+// Audio context for iOS (helps with autoplay restrictions)
+let audioContext = null;
+function initAudioContext() {
+    if (!audioContext && typeof AudioContext !== 'undefined') {
+        audioContext = new AudioContext();
+    }
+    return audioContext;
 }
 
 let mediaRecorder;
 let audioChunks = [];
 let isRecording = false;
 
+// Mark user interaction on any button click
+document.addEventListener('click', () => {
+    if (!userHasInteracted) {
+        userHasInteracted = true;
+        console.log('User interaction detected - audio playback enabled');
+        
+        // Resume audio context if suspended (iOS requirement)
+        const ctx = initAudioContext();
+        if (ctx && ctx.state === 'suspended') {
+            ctx.resume();
+        }
+    }
+}, { once: true });
+
 // Audio Recording Logic
 recordButton.addEventListener('click', async () => {
     if (!isRecording) {
-        startRecording();
+        await startRecording();
     } else {
         stopRecording();
     }
@@ -109,12 +143,32 @@ recordButton.addEventListener('click', async () => {
 
 async function startRecording() {
     try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream);
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                sampleRate: 44100
+            }
+        });
+        
+        mediaRecorder = new MediaRecorder(stream, {
+            mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : 'audio/mp4'
+        });
         audioChunks = [];
 
-        mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
+        mediaRecorder.ondataavailable = event => {
+            if (event.data.size > 0) {
+                audioChunks.push(event.data);
+            }
+        };
+        
         mediaRecorder.onstop = sendAudio;
+        
+        mediaRecorder.onerror = (event) => {
+            console.error('MediaRecorder error:', event.error);
+            alert(getText('error'));
+            resetRecordingState();
+        };
 
         mediaRecorder.start();
         isRecording = true;
@@ -124,6 +178,7 @@ async function startRecording() {
     } catch (err) {
         alert(getText('micError'));
         console.error('Microphone error:', err);
+        resetRecordingState();
     }
 }
 
@@ -138,8 +193,22 @@ function stopRecording() {
     recordingStatus.textContent = getText('processing');
 }
 
+function resetRecordingState() {
+    isRecording = false;
+    recordButton.classList.remove('recording');
+    recordButton.querySelector('.button-text').textContent = getText('startRecording');
+    recordingStatus.textContent = getText('ready');
+}
+
 // Sending Logic
 async function sendAudio() {
+    if (audioChunks.length === 0) {
+        console.error('No audio data recorded');
+        alert(getText('error'));
+        resetRecordingState();
+        return;
+    }
+
     const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
     const formData = new FormData();
     formData.append('audio', audioBlob, 'input.wav');
@@ -190,10 +259,9 @@ async function processResponse(formData) {
             addMessage(getText('assistant'), data.botResponse, null, false, data.messageId, 'bot_english');
         }
 
-        // Play audio if available - SIMPLE APPROACH (matches scenario pages)
+        // Play audio if available - with robust error handling
         if (data.audioId) {
-            audioPlayer.src = `/api/audio/${data.audioId}`;
-            audioPlayer.play().catch(err => console.error('Audio play error:', err));
+            await playAudioWithFallback(data.audioId);
         }
         
     } catch (e) {
@@ -201,6 +269,60 @@ async function processResponse(formData) {
         addMessage(getText('system'), getText('error'), null, false, null, null);
     } finally {
         recordingStatus.textContent = getText('ready');
+    }
+}
+
+// Improved audio playback with fallback strategies
+async function playAudioWithFallback(audioId) {
+    const audioUrl = `/api/audio/${audioId}`;
+    
+    try {
+        // Strategy 1: Standard audio element play
+        audioPlayer.src = audioUrl;
+        
+        // Load the audio first
+        await new Promise((resolve, reject) => {
+            audioPlayer.onloadeddata = resolve;
+            audioPlayer.onerror = reject;
+            audioPlayer.load();
+        });
+        
+        // Attempt to play
+        const playPromise = audioPlayer.play();
+        
+        if (playPromise !== undefined) {
+            await playPromise;
+            console.log('Audio playback started successfully');
+        }
+    } catch (err) {
+        console.error('Audio playback error:', err);
+        
+        // Strategy 2: Try resuming audio context and retrying (iOS fix)
+        if (err.name === 'NotAllowedError' || err.name === 'NotSupportedError') {
+            const ctx = initAudioContext();
+            if (ctx && ctx.state === 'suspended') {
+                try {
+                    await ctx.resume();
+                    await audioPlayer.play();
+                    console.log('Audio playback started after context resume');
+                    return;
+                } catch (retryErr) {
+                    console.error('Retry after context resume failed:', retryErr);
+                }
+            }
+        }
+        
+        // Strategy 3: Create new audio element (Safari sometimes needs this)
+        try {
+            const newAudio = new Audio(audioUrl);
+            newAudio.preload = 'auto';
+            newAudio.setAttribute('playsinline', '');
+            await newAudio.play();
+            console.log('Audio playback started with new element');
+        } catch (finalErr) {
+            console.error('All audio playback strategies failed:', finalErr);
+            // Don't show error to user - audio failure is not critical
+        }
     }
 }
 
@@ -228,7 +350,7 @@ function addMessage(role, text, initialTranslation, isUser, messageId, jsonKey) 
             // Fetch translation if not already loaded
             if (!initialTranslation) {
                 transDiv.textContent = 'Loading...';
-                transDiv.style.color = '#999'; // Make "Loading..." visible
+                transDiv.style.color = '#999';
                 
                 try {
                     const translation = await fetchTranslationWithRetry(messageId, jsonKey);
@@ -296,5 +418,16 @@ sendButton.addEventListener('click', sendText);
 userInput.addEventListener('keypress', (e) => {
     if (e.key === 'Enter') {
         sendText();
+    }
+});
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        mediaRecorder.stop();
+        mediaRecorder.stream.getTracks().forEach(track => track.stop());
+    }
+    if (audioContext) {
+        audioContext.close();
     }
 });
