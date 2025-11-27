@@ -1,47 +1,81 @@
 <!DOCTYPE html>
 <html lang="zh">
-
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>中文图像猜测器 | Chinese Image Guesser</title>
-    <link rel="stylesheet" href="../static/css/styles.css">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <style>
+        /* Inline styles for the new feedback element */
+        .feedback-container {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f0f4f8;
+            border-radius: 12px;
+            border-left: 5px solid #007bff;
+            display: none; /* Hidden by default */
+            text-align: left;
+            font-size: 1.1em;
+            line-height: 1.5;
+            color: #333;
+        }
+        .feedback-label {
+            font-weight: bold;
+            color: #007bff;
+            font-size: 0.9em;
+            text-transform: uppercase;
+            margin-bottom: 5px;
+        }
+    </style>
 </head>
-
 <body>
     <div class="container">
+        <header>
+            <h1>语言学习助手</h1>
+            <a href="{{ url_for('home') }}" class="home-link">
+                <span>← 返回主页</span>
+            </a>
+        </header>
+        
         <div class="chat-container">
             <div class="chat-header chinese">
                 <div class="icon chinese">中</div>
                 <h2>中文图像猜测器</h2>
             </div>
-
-            <div class="chat-header chinese">
-                <h3>你看到了什么?</h3>
+            
+            <div class="image-game-content">
+                <div class="game-prompt">
+                    <h3>你看到了什么?</h3>
+                </div>
+                
+                {% if img_file %}
+                <div class="image-container">
+                    <img id="dynamic-image" src="{{ img_file }}" alt="Random Image" class="game-image">
+                    
+                    <div id="feedback-container" class="feedback-container">
+                        <div class="feedback-label">AI 回答 (AI Response):</div>
+                        <div id="feedback-text"></div>
+                    </div>
+                </div>
+                {% endif %}
+                
+                <div class="input-area">
+                    <div class="voice-input-container">
+                        <button id="recordButton" class="record-button">
+                            <span class="mic-icon">🎤</span>
+                            <span class="button-text">按下开始录音</span>
+                        </button>
+                        <div class="recording-status" id="recordingStatus">准备就绪</div>
+                    </div>
+                </div>
             </div>
-            {% if img_file %}
-            <div>
-                <img id='dynamic-image' src="{{ img_file }}" alt="Random Image"
-                    class="medium-image">
-            </div>
-            {% endif %}
-            <div class="voice-input-container">
-                <button id="recordButton" class="record-button">
-                    <span class="mic-icon">🎤</span>
-                    <span class="button-text">按下开始录音</span>
-                </button>
-                <div class="recording-status" id="recordingStatus">准备就绪</div>
-            </div>
-
-            <a href="{{ url_for('home') }}" class="back-link">← 返回主页</a>
         </div>
-
+        
         <footer>
             <p>Powered by Python NLP</p>
         </footer>
     </div>
-
-    <script src="../static/js/image.js"></script>
+    
+    <script src="/static/js/image.js"></script>
 </body>
-
 </html>

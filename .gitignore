@@ -5,3 +5,14 @@ dev.ipynb
 /venv
 *.env
 *.log
+models/
+__pycache__/
+*.pyc
+.env
+.venv/
+uv.lock
+*.wav
+*.mp3
+.DS_Store.
+*.gguf
+/certs/

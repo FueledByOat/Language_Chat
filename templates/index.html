@@ -1,58 +1,62 @@
 <!DOCTYPE html>
 <html lang="en">
-
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Bilingual Chat Assistant</title>
-    <link rel="stylesheet" href="../static/css/styles.css">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <link rel="icon" type="image/png" href="/static/favicon/favicon-96x96.png" sizes="96x96" />
+    <link rel="icon" type="image/svg+xml" href="/static/favicon/favicon.svg" />
+    <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon/apple-touch-icon.png" />
 </head>
-
-<body>
-    <div class="container">
-        <header>
+<body class="home-body">
+    <div class="home-container">
+        <header class="home-header">
             <h1>Language Learning Assistant</h1>
             <div class="language-icons">
                 <div class="icon chinese">中</div>
                 <div class="icon japanese">日</div>
             </div>
         </header>
-
-        <main>
+        <main class="home-main">
             <p class="welcome-text">Welcome to your language assistant. Select an experience to begin.</p>
-
             <div class="language-selection">
-                <a href="{{ url_for('language_image_page', language='chinese')}}" class="language-card chinese">
+                <a href="{{ url_for('language_image', language='chinese')}}" class="language-card chinese">
+                    <div class="card-decoration"></div>
                     <h2>中国图片</h2>
                     <p>Chinese Image</p>
-                    <div class="card-decoration"></div>
                 </a>
-
                 <a href="{{ url_for('chinese') }}" class="language-card chinese">
+                    <div class="card-decoration"></div>
                     <h2>中文聊天</h2>
                     <p>Chinese Chat</p>
-                    <div class="card-decoration"></div>
                 </a>
-                <div class="language-selection">
-                    <a href="{{ url_for('language_image_page', language='japanese') }}" class="language-card japanese">
-                        <h2>日本ピクチャーズ</h2>
-                        <p>Japanese Image</p>
-                        <div class="card-decoration"></div>
-                    </a>
-
-
-                    <a href="{{ url_for('japanese') }}" class="language-card japanese">
-                        <h2>日本語</h2>
-                        <p>Japanese Chat</p>
-                        <div class="card-decoration"></div>
-                    </a>
-                </div>
+                <a href="{{ url_for('scenario_page', language='chinese') }}" class="language-card chinese">
+                    <div class="card-decoration"></div>
+                    <h2>中文聊天</h2>
+                    <p>Chinese Scenario</p>
+                </a>
+                <a href="{{ url_for('language_image', language='japanese') }}" class="language-card japanese">
+                    <div class="card-decoration"></div>
+                    <h2>日本ピクチャーズ</h2>
+                    <p>Japanese Image</p>
+                </a>
+                <a href="{{ url_for('japanese') }}" class="language-card japanese">
+                    <div class="card-decoration"></div>
+                    <h2>日本語</h2>
+                    <p>Japanese Chat</p>
+                </a>
+                <a href="{{ url_for('scenario_page', language='japanese') }}" class="language-card japanese">
+                    <div class="card-decoration"></div>
+                    <h2>日本語</h2>
+                    <p>Japanese Scenario</p>
+                </a>
+            </div>
         </main>
-
-        <footer>
+        <footer class="home-footer">
             <p>Powered by Python NLP</p>
         </footer>
     </div>
 </body>
-
 </html>
