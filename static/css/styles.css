@@ -922,3 +922,26 @@ footer {
     /* Main message text styling */
     line-height: 1.5;
 }
+.word-token {
+    margin: 0 2px;
+    cursor: pointer;
+    border-bottom: 1px dotted transparent;
+    transition: all 0.2s;
+}
+
+.word-token:hover {
+    background-color: #f0f0f0;
+    border-bottom: 1px dotted #999;
+}
+
+/* Status Colors */
+.status-new ruby { color: #666; } /* Grey for unknown */
+.status-learning ruby { color: #2196F3; } /* Blue for learning */
+.status-mastered { color: #000; } /* Black for known */
+
+/* Reading Text Styling */
+rt {
+    font-size: 0.6em;
+    color: #888;
+    user-select: none;
+}

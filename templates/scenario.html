@@ -9,6 +9,84 @@
     <link rel="icon" type="image/svg+xml" href="/static/favicon/favicon.svg" />
     <link rel="shortcut icon" href="/static/favicon/favicon.ico" />
     <link rel="apple-touch-icon" sizes="180x180" href="/static/favicon/apple-touch-icon.png" />
+
+    <style>
+        /* --- NEW: Smart Transcript Styles --- */
+        .word-token {
+            margin: 0 2px;
+            cursor: pointer;
+            border-bottom: 1px dotted transparent;
+            transition: all 0.2s;
+            display: inline-block;
+        }
+        .word-token:hover {
+            background-color: rgba(0,0,0,0.05);
+            border-bottom: 1px dotted #999;
+        }
+        
+        /* SRS Level Colors */
+        .status-new ruby { color: #666; } /* Level 0: Grey */
+        .status-learning ruby { color: #007bff; font-weight: 500; } /* Level 1-3: Blue */
+        .status-mastered { color: #222; } /* Level 4+: Black */
+
+        /* Ruby Text (Furigana/Pinyin) Styling */
+        rt {
+            font-size: 0.6em;
+            color: #888;
+            user-select: none;
+            font-weight: normal;
+        }
+
+        /* --- NEW: Modal Styles --- */
+        .modal {
+            display: none; 
+            position: fixed; 
+            z-index: 1000; 
+            left: 0; 
+            top: 0; 
+            width: 100%; 
+            height: 100%; 
+            background-color: rgba(0,0,0,0.5);
+            backdrop-filter: blur(2px);
+        }
+        .modal-content {
+            background-color: #fefefe;
+            margin: 20% auto;
+            padding: 25px;
+            border: 1px solid #888;
+            width: 85%;
+            max-width: 400px;
+            border-radius: 12px;
+            text-align: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        .modal-word-display { font-size: 2em; margin: 10px 0 5px; }
+        .modal-reading-display { font-size: 1.2em; color: #666; margin-bottom: 20px; }
+        .modal-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 20px; }
+        .btn-vocab { padding: 12px; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; color: white; transition: opacity 0.2s; }
+        .btn-vocab:hover { opacity: 0.9; }
+        .btn-close { background-color: #6c757d; grid-column: span 2; margin-top: 10px; }
+        .btn-learn { background-color: #007bff; }
+        .btn-master { background-color: #28a745; }
+    .modal-translation-spoiler {
+    margin: 15px 0;
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    font-size: 1.1em;
+    cursor: pointer;
+}
+.spoiler-blur {
+    filter: blur(5px);
+    user-select: none;
+    transition: filter 0.3s ease;
+}
+.spoiler-revealed {
+    filter: none;
+    user-select: text;
+}
+    
+    </style>
 </head>
 <body>
     <div class="container">
@@ -36,7 +114,7 @@
 
             <div class="chat-messages" id="chatMessages">
                 <div class="message bot-message">
-                    Select a scenario above and say hello to start!
+                    <div class="message-text">Select a scenario above and say hello to start!</div>
                 </div>
             </div>
 
@@ -63,257 +141,414 @@
 
     <audio id="audioPlayer" class="hidden"></audio>
 
+    <div id="vocabModal" class="modal">
+        <div class="modal-content">
+            <div id="modalWord" class="modal-word-display">Word</div>
+            <div id="modalReading" class="modal-reading-display">Reading</div>
+            
+            <div id="modalTranslationContainer" class="modal-translation-spoiler">
+        <span id="modalTranslationText" class="spoiler-blur">Click to Reveal Meaning</span>
+    </div>
+            <div class="modal-buttons">
+                <button class="btn-vocab btn-learn" onclick="updateWordStatus(1)">Mark Learning</button>
+                <button class="btn-vocab btn-master" onclick="updateWordStatus(4)">Mark Known</button>
+                <button class="btn-vocab btn-close" onclick="closeModal()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <script>
-const sessionId = crypto.randomUUID();
-const language = "{{ language }}";
-const scenariosData = {{ scenarios | tojson }};
+        const sessionId = crypto.randomUUID();
+        const language = "{{ language }}";
+        const scenariosData = {{ scenarios | tojson }};
 
-// DOM Elements
-const recordButton = document.getElementById('recordButton');
-const recordingStatus = document.getElementById('recordingStatus');
-const chatMessages = document.getElementById('chatMessages');
-const scenarioSelect = document.getElementById('scenarioSelect');
-const scenarioDesc = document.getElementById('scenarioDesc');
-const resetButton = document.getElementById('resetButton');
-const userInput = document.getElementById('userInput');
-const sendButton = document.getElementById('sendButton');
-
-// Create audio player if it doesn't exist
-let audioPlayer = document.getElementById('audioPlayer');
-if (!audioPlayer) {
-    audioPlayer = document.createElement('audio');
-    audioPlayer.id = 'audioPlayer';
-    audioPlayer.style.display = 'none';
-    document.body.appendChild(audioPlayer);
-}
-
-let mediaRecorder;
-let audioChunks = [];
-let isRecording = false;
-
-// 1. Handle Scenario UI Changes
-function updateDesc() {
-    const key = scenarioSelect.value;
-    scenarioDesc.textContent = scenariosData[key].description;
-    chatMessages.innerHTML = '<div class="message bot-message">Scenario changed. Start speaking!</div>';
-}
-
-scenarioSelect.addEventListener('change', updateDesc);
-updateDesc(); // Initialize
-
-// 2. Handle Reset
-resetButton.addEventListener('click', async () => {
-    const formData = new FormData();
-    formData.append('session_id', sessionId);
-    try {
-        await fetch('/api/reset-session', { method: 'POST', body: formData });
-        chatMessages.innerHTML = '<div class="message bot-message">Conversation reset. Start speaking!</div>';
-    } catch (err) {
-        console.error('Reset error:', err);
-    }
-});
-
-// 3. Audio Recording Logic
-recordButton.addEventListener('click', async () => {
-    if (!isRecording) {
-        startRecording();
-    } else {
-        stopRecording();
-    }
-});
-
-async function startRecording() {
-    try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        mediaRecorder = new MediaRecorder(stream);
-        audioChunks = [];
-
-        mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
-        mediaRecorder.onstop = sendAudio;
-
-        mediaRecorder.start();
-        isRecording = true;
-        recordButton.classList.add('recording');
-        recordButton.querySelector('.button-text').textContent = 'Stop';
-        recordingStatus.textContent = 'Recording...';
-    } catch (err) {
-        alert('Microphone access denied');
-        console.error('Microphone error:', err);
-    }
-}
-
-function stopRecording() {
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-        mediaRecorder.stop();
-        mediaRecorder.stream.getTracks().forEach(track => track.stop());
-    }
-    isRecording = false;
-    recordButton.classList.remove('recording');
-    recordButton.querySelector('.button-text').textContent = 'Hold to Speak';
-    recordingStatus.textContent = 'Processing...';
-}
-
-// 4. Sending Logic
-async function sendAudio() {
-    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-    const formData = new FormData();
-    formData.append('audio', audioBlob, 'input.wav');
-    formData.append('language', language);
-    formData.append('scenario', scenarioSelect.value);
-    formData.append('session_id', sessionId);
-    
-    await processResponse(formData);
-}
-
-async function sendText() {
-    const text = userInput.value.trim();
-    if (!text) return;
-
-    addMessage('You', text, null, true, null, null);
-    userInput.value = '';
-
-    const formData = new FormData();
-    formData.append('text', text);
-    formData.append('language', language);
-    formData.append('scenario', scenarioSelect.value);
-    formData.append('session_id', sessionId);
-
-    await processResponse(formData);
-}
-
-async function processResponse(formData) {
-    try {
-        recordingStatus.textContent = 'Thinking...';
+        // DOM Elements
+        const recordButton = document.getElementById('recordButton');
+        const recordingStatus = document.getElementById('recordingStatus');
+        const chatMessages = document.getElementById('chatMessages');
+        const scenarioSelect = document.getElementById('scenarioSelect');
+        const scenarioDesc = document.getElementById('scenarioDesc');
+        const resetButton = document.getElementById('resetButton');
+        const userInput = document.getElementById('userInput');
+        const sendButton = document.getElementById('sendButton');
         
-        const response = await fetch('/api/scenario-chat', {
-            method: 'POST',
-            body: formData
+        // Modal Elements
+        const vocabModal = document.getElementById('vocabModal');
+        const modalWord = document.getElementById('modalWord');
+        const modalReading = document.getElementById('modalReading');
+        let currentSelectedToken = null; // Stores data of the word being clicked
+
+        // Audio Player
+        let audioPlayer = document.getElementById('audioPlayer');
+        if (!audioPlayer) {
+            audioPlayer = document.createElement('audio');
+            audioPlayer.id = 'audioPlayer';
+            audioPlayer.style.display = 'none';
+            document.body.appendChild(audioPlayer);
+        }
+
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+
+        // 1. Handle Scenario UI Changes
+        function updateDesc() {
+            const key = scenarioSelect.value;
+            scenarioDesc.textContent = scenariosData[key].description;
+            chatMessages.innerHTML = '<div class="message bot-message"><div class="message-text">Scenario changed. Start speaking!</div></div>';
+        }
+
+        scenarioSelect.addEventListener('change', updateDesc);
+        updateDesc(); 
+
+        // 2. Handle Reset
+        resetButton.addEventListener('click', async () => {
+            const formData = new FormData();
+            formData.append('session_id', sessionId);
+            try {
+                await fetch('/api/reset-session', { method: 'POST', body: formData });
+                chatMessages.innerHTML = '<div class="message bot-message"><div class="message-text">Conversation reset. Start speaking!</div></div>';
+            } catch (err) {
+                console.error('Reset error:', err);
+            }
         });
 
-        if (!response.ok) {
-            throw new Error(`Server error: ${response.status}`);
+        // 3. Audio Recording Logic
+        recordButton.addEventListener('click', async () => {
+            if (!isRecording) {
+                startRecording();
+            } else {
+                stopRecording();
+            }
+        });
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = event => audioChunks.push(event.data);
+                mediaRecorder.onstop = sendAudio;
+
+                mediaRecorder.start();
+                isRecording = true;
+                recordButton.classList.add('recording');
+                recordButton.querySelector('.button-text').textContent = 'Stop';
+                recordingStatus.textContent = 'Recording...';
+            } catch (err) {
+                alert('Microphone access denied');
+                console.error('Microphone error:', err);
+            }
         }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            }
+            isRecording = false;
+            recordButton.classList.remove('recording');
+            recordButton.querySelector('.button-text').textContent = 'Hold to Speak';
+            recordingStatus.textContent = 'Processing...';
+        }
+
+        // 4. Sending Logic
+        async function sendAudio() {
+            const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+            const formData = new FormData();
+            formData.append('audio', audioBlob, 'input.wav');
+            formData.append('language', language);
+            formData.append('scenario', scenarioSelect.value);
+            formData.append('session_id', sessionId);
+            
+            await processResponse(formData);
+        }
+
+        async function sendText() {
+            const text = userInput.value.trim();
+            if (!text) return;
+
+            // User messages are always just text
+            addMessage('You', text, null, true, null, null);
+            userInput.value = '';
+
+            const formData = new FormData();
+            formData.append('text', text);
+            formData.append('language', language);
+            formData.append('scenario', scenarioSelect.value);
+            formData.append('session_id', sessionId);
+
+            await processResponse(formData);
+        }
+
+        async function processResponse(formData) {
+            try {
+                recordingStatus.textContent = 'Thinking...';
+                
+                const response = await fetch('/api/scenario-chat', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.status}`);
+                }
+                
+                const data = await response.json();
+
+                // Handle transcribed text (from audio)
+                const userText = data.userText || data.transcribedText;
+                if (userText) {
+                    addMessage('You', userText, null, true, data.messageId, 'user_english');
+                }
+
+                // Handle bot response (With Tokens!)
+                if (data.botResponse) {
+                    // Pass botTokens if available, otherwise just text
+                    addMessage('Assistant', data.botResponse, data.botTokens, false, data.messageId, 'bot_english');
+                }
+
+                // Play audio if available
+                if (data.audioId) {
+                    audioPlayer.src = `/api/audio/${data.audioId}`;
+                    audioPlayer.play().catch(err => console.error('Audio play error:', err));
+                }
+                
+            } catch (e) {
+                console.error('Chat error:', e);
+                alert('Something went wrong. Please try again.');
+            } finally {
+                recordingStatus.textContent = 'Ready';
+            }
+        }
+
+        // 5. Add Message (Updated for Smart Transcript)
+        function addMessage(role, text, tokens, isUser, messageId, jsonKey) {
+            const messageBubble = document.createElement('div');
+            messageBubble.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
+
+            // --- CHANGED: Content Logic ---
+            const textDiv = document.createElement('div');
+            textDiv.className = 'message-text';
+
+            if (!isUser && tokens && tokens.length > 0) {
+                // If we have tokens, render the interactive transcript
+                textDiv.appendChild(renderSmartText(tokens));
+            } else {
+                // Fallback to raw text
+                textDiv.textContent = text;
+            }
+            messageBubble.appendChild(textDiv);
+            // ------------------------------
+
+            // Spoiler Translation Logic (Existing)
+            if (messageId && jsonKey) {
+                const transDiv = document.createElement('div');
+                transDiv.className = 'spoiler-hidden';
+                transDiv.textContent = 'Click to reveal translation';
+                
+                transDiv.onclick = async () => {
+                    if (transDiv.classList.contains('spoiler-visible')) return;
+
+                    transDiv.textContent = 'Loading...';
+                    try {
+                        const translation = await fetchTranslationWithRetry(messageId, jsonKey);
+                        transDiv.textContent = translation;
+                        transDiv.classList.remove('spoiler-hidden');
+                        transDiv.classList.add('spoiler-visible');
+                    } catch (err) {
+                        transDiv.textContent = 'Translation unavailable';
+                    }
+                };
+                messageBubble.appendChild(transDiv);
+            }
+
+            chatMessages.appendChild(messageBubble);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        // --- NEW: Render Interactive Smart Text ---
+        function renderSmartText(tokens) {
+            const container = document.createElement('span');
+            
+            tokens.forEach(token => {
+                const span = document.createElement('span');
+                span.classList.add('word-token');
+
+                // Color coding
+                if (token.srs_level === 0) span.classList.add('status-new');
+                else if (token.srs_level >= 4) span.classList.add('status-mastered');
+                else span.classList.add('status-learning');
+
+                // If new/learning, use ruby tag. If mastered, just text.
+                if (token.srs_level < 4) {
+                    const ruby = document.createElement('ruby');
+                    const rt = document.createElement('rt');
+                    ruby.textContent = token.surface;
+                    rt.textContent = token.reading;
+                    ruby.appendChild(rt);
+                    span.appendChild(ruby);
+                } else {
+                    span.textContent = token.surface;
+                }
+
+                // Click to learn
+                span.onclick = () => openModal(token);
+                container.appendChild(span);
+            });
+            return container;
+        }
+
+        // --- NEW: Modal & SRS Logic ---
+async function openModal(token) {
+    currentSelectedToken = token;
+    modalWord.textContent = token.surface;
+    modalReading.textContent = token.reading;
+    
+    // Reset Spoiler UI
+    const spoilerText = document.getElementById('modalTranslationText');
+    spoilerText.textContent = "Loading translation...";
+    spoilerText.className = "spoiler-blur"; // Reset blur
+    
+    // Show Modal
+    vocabModal.style.display = "block";
+
+    // Lazy Load Translation
+    try {
+        // We use a quick hack: hit the existing translate endpoint with just the word
+        // Note: You might want a dedicated endpoint for this later, but this works now.
+        // We generate a temp ID for this lookup
+        const tempId = crypto.randomUUID(); 
         
-        const data = await response.json();
-
-        // Handle transcribed text (from audio)
-        if (data.transcribedText) {
-            addMessage('You', data.transcribedText, null, true, data.messageId, 'user_english');
-        }
-
-        // Handle bot response
-        if (data.botResponse) {
-            addMessage('Assistant', data.botResponse, null, false, data.messageId, 'bot_english');
-        }
-
-        // Play audio if available
-        if (data.audioId) {
-            audioPlayer.src = `/api/audio/${data.audioId}`;
-            audioPlayer.play().catch(err => console.error('Audio play error:', err));
+        // 1. Send word to be translated (using text-chat for quick single-word translation)
+        // Ideally, you should expose a direct `translate(text, source_lang)` API.
+        // For now, let's just use the visual hint.
+        
+        // BETTER APPROACH: Add a tiny helper in main.py for word translation, 
+        // OR just rely on the user clicking to reveal if you have the definition.
+        
+        // If the token had a definition (future feature), use it:
+        if (token.definition) {
+            spoilerText.textContent = token.definition;
+        } else {
+             // Fallback: Click to reveal (Simulation)
+             spoilerText.textContent = "English Meaning Hidden";
         }
         
     } catch (e) {
-        console.error('Chat error:', e);
-        alert('Something went wrong. Please try again.');
-    } finally {
-        recordingStatus.textContent = 'Ready';
+        spoilerText.textContent = "Translation unavailable";
     }
-}
-
-// 5. Add message with spoiler translation support
-function addMessage(role, text, initialTranslation, isUser, messageId, jsonKey) {
-    const messageBubble = document.createElement('div');
-    messageBubble.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
-
-    // Main message text
-    const textDiv = document.createElement('div');
-    textDiv.className = 'message-text';
-    textDiv.textContent = text;
-    messageBubble.appendChild(textDiv);
-
-    // Only add translation spoiler if we have a messageId
-    if (messageId && jsonKey) {
-        const transDiv = document.createElement('div');
-        transDiv.className = 'spoiler-hidden';
-        transDiv.textContent = initialTranslation || 'Click to reveal translation';
-        
-        transDiv.onclick = async () => {
-            // Already visible? Do nothing
-            if (transDiv.classList.contains('spoiler-visible')) return;
-
-            // Fetch translation if not already loaded
-            if (!initialTranslation) {
-                transDiv.textContent = 'Loading...';
-                transDiv.style.color = '#999'; // Make "Loading..." visible
-                
-                try {
-                    const translation = await fetchTranslationWithRetry(messageId, jsonKey);
-                    transDiv.textContent = translation;
-                    initialTranslation = translation;
-                } catch (err) {
-                    console.error('Translation error:', err);
-                    transDiv.textContent = 'Translation unavailable';
-                    transDiv.classList.remove('spoiler-hidden');
-                    transDiv.classList.add('spoiler-visible');
-                    return;
-                }
-            }
-
-            // Reveal translation
-            transDiv.classList.remove('spoiler-hidden');
-            transDiv.classList.add('spoiler-visible');
-        };
-
-        messageBubble.appendChild(transDiv);
-    }
-
-    chatMessages.appendChild(messageBubble);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-}
-
-// Helper to poll the translation endpoint
-async function fetchTranslationWithRetry(messageId, key, attempts = 0) {
-    const maxAttempts = 6;
     
-    if (attempts >= maxAttempts) {
-        throw new Error('Translation timeout');
-    }
+    // Click to Reveal
+    document.getElementById('modalTranslationContainer').onclick = () => {
+        spoilerText.className = "spoiler-revealed";
+        // If we still don't have text, maybe fetch it here?
+        if (spoilerText.textContent === "English Meaning Hidden") {
+             fetchWordTranslation(token.base_form); 
+        }
+    };
+}
 
+async function fetchWordTranslation(word) {
+    const spoilerText = document.getElementById('modalTranslationText');
+    spoilerText.textContent = "translating...";
+    
+    // We need a simple translation endpoint. 
+    // Since we don't have one, let's create a quick client-side fetch 
+    // to your EXISTING chat endpoint but framed as a translation request?
+    // No, that's messy.
+    
+    // RECOMMENDATION: Add this tiny endpoint to main.py
+    /*
+    @app.post("/api/translate-word")
+    async def translate_word(text: str = Form(...), language: str = Form(...)):
+         result = await asyncio.to_thread(models["translator"].translate_to_english, text, language)
+         return {"translation": result}
+    */
+    
+    const formData = new FormData();
+    formData.append('text', word);
+    formData.append('language', language);
+    
     try {
-        const res = await fetch(`/api/translation/${messageId}`);
-        
-        if (res.status === 202) {
-            // Still pending, wait and retry
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            return fetchTranslationWithRetry(messageId, key, attempts + 1);
-        }
-        
-        if (!res.ok) {
-            throw new Error(`HTTP ${res.status}`);
-        }
-        
+        const res = await fetch('/api/translate-word', { method: 'POST', body: formData });
         const data = await res.json();
-        return data[key] || 'Translation not found';
-        
-    } catch (err) {
-        console.error(`Translation fetch attempt ${attempts + 1} failed:`, err);
-        
-        if (attempts < maxAttempts - 1) {
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            return fetchTranslationWithRetry(messageId, key, attempts + 1);
-        }
-        
-        throw err;
+        spoilerText.textContent = data.translation;
+    } catch(e) {
+        spoilerText.textContent = "Error loading translation";
     }
 }
 
-// Event Listeners for Text Input
-sendButton.addEventListener('click', sendText);
-userInput.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-        sendText();
-    }
-});
+        function closeModal() {
+            vocabModal.style.display = "none";
+            currentSelectedToken = null;
+        }
+
+        // Close modal if clicking outside
+        window.onclick = function(event) {
+            if (event.target == vocabModal) {
+                closeModal();
+            }
+        }
+
+        async function updateWordStatus(newLevel) {
+            if (!currentSelectedToken) return;
+
+            const payload = {
+                word_base: currentSelectedToken.base_form,
+                language: language,
+                new_level: newLevel,
+                user_id: sessionId // Using session_id as user_id for now
+            };
+
+            try {
+                const res = await fetch('/api/vocab/update', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                
+                if (res.ok) {
+                    // Update successful - Close modal
+                    // (Optional: You could find the specific DOM element and update its class immediately)
+                    closeModal();
+                } else {
+                    alert("Failed to save progress.");
+                }
+            } catch (err) {
+                console.error("SRS Update Error:", err);
+            }
+        }
+
+        // Helper to poll translation
+        async function fetchTranslationWithRetry(messageId, key, attempts = 0) {
+            const maxAttempts = 6;
+            if (attempts >= maxAttempts) throw new Error('Translation timeout');
+
+            try {
+                const res = await fetch(`/api/translation/${messageId}`);
+                if (res.status === 202) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    return fetchTranslationWithRetry(messageId, key, attempts + 1);
+                }
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                return data[key] || 'Translation not found';
+            } catch (err) {
+                if (attempts < maxAttempts - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    return fetchTranslationWithRetry(messageId, key, attempts + 1);
+                }
+                throw err;
+            }
+        }
+
+        // Event Listeners for Text Input
+        sendButton.addEventListener('click', sendText);
+        userInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendText();
+        });
     </script>
 </body>
 </html>

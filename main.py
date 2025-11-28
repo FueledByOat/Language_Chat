@@ -42,9 +42,11 @@ import audio_io.audio_io as audio_service
 import language_model.multilingual_model as llm_service
 import translation.translator as translation_service
 import translation.whisper_transcribe_claude as transcription_service
-from vqa_model.vqa_service import VQAService
 import utils.helper as utils
 from config import Config
+from app.services.nlp import NLPService
+from app.services.vocab import VocabService
+from constants.scenarios import SCENARIOS
 
 
 # ==============================================================================
@@ -63,143 +65,36 @@ templates = Jinja2Templates(directory="templates")
 models: Dict[str, Any] = {}
 http_client = httpx.AsyncClient(timeout=20.0, follow_redirects=True)
 SUPPORTED_LANGUAGES = {"chinese", "japanese"}
+nlp_service = NLPService()
+vocab_service = VocabService()
 
-# ==============================================================================
-# 0.1 Scenario Configuration
-# ==============================================================================
 
-SCENARIOS = {
-    "hotel": {
-        "name": "Hotel Check-in",
-        "description": "You are checking into a hotel. The assistant is the receptionist.",
-        "difficulty": "beginner",
-        "nuance": {
-            "ja": "Hotel staff typically use very polite 敬語 (keigo). Expect phrases like『ご予約はございますか？』and polite name confirmation using『様』.",
-            "zh": "Hotel staff speak neutrally and professionally. Expect direct questions such as『请问您有预订吗？』and formal address『先生/女士』.",
-        },
-        "prompt": "You are a receptionist at a high-end hotel. The user is a guest checking in. Ask for their name, reservation details, passport, and if they need help with luggage. Use polite and professional speech.",
-    },
-    "convenience_store": {
-        "name": "Convenience Store",
-        "description": "You are buying snacks. The assistant is the clerk.",
-        "difficulty": "beginner",
-        "nuance": {
-            "ja": "Konbini staff speak quickly with set phrases. Ask about『温めますか？』(heat the bento) and『袋ご利用ですか？』.",
-            "zh": "Chinese convenience stores are more direct. Staff may simply say『要袋子吗？』or『需要加热吗？』with little small talk.",
-        },
-        "prompt": "You are a clerk at a busy convenience store. Ask if they want a bag, receipt, or want food heated up.",
-    },
-    "taxi": {
-        "name": "Taxi Ride",
-        "description": "You are giving directions to a taxi driver.",
-        "difficulty": "beginner",
-        "nuance": {
-            "ja": "Taxi drivers often confirm exact details politely:『高速道路でよろしいですか？』and ask about AC:『エアコンは大丈夫ですか？』.",
-            "zh": "Taxi interactions tend to be direct. Drivers may ask『走高速吗？』or『空调要开吗？』in casual tone.",
-        },
-        "prompt": "You are a taxi driver. Ask where they want to go, confirm route preference, and check air conditioning comfort.",
-    },
-    "restaurant_dine_in": {
-        "name": "Restaurant Dine-In",
-        "description": "Ordering food at a restaurant.",
-        "difficulty": "intermediate",
-        "nuance": {
-            "ja": "Staff use polite service speech, often ending with『〜になります』. Expect questions about allergies and course style.",
-            "zh": "Restaurant staff may be friendly but straightforward. Expect『要点什么？』or『要不要加点饮料？』.",
-        },
-        "prompt": "You are a waiter. Ask about reservation, party size, drinks, food order, and allergies.",
-    },
-    "train_station": {
-        "name": "Train Station Assistance",
-        "description": "Asking for help navigating a train system.",
-        "difficulty": "intermediate",
-        "nuance": {
-            "ja": "Japan’s train system is complex. Staff use polite forms and may clarify『快速』『普通』『特急』. Expect detailed directions.",
-            "zh": "Chinese train stations are crowded. Staff often speak quickly and directly with phrases like『请到X号窗口』or『乘坐X号线』.",
-        },
-        "prompt": "You are a station attendant. Help the user identify platforms, ticket types, and train options.",
-    },
-    "airport_checkin": {
-        "name": "Airport Check-in",
-        "description": "Checking in for a flight.",
-        "difficulty": "intermediate",
-        "nuance": {
-            "ja": "Polite, structured dialogue. Staff may use very formal Japanese and indirect phrasing.",
-            "zh": "Chinese airport staff prioritize efficiency. Expect concise instructions and direct requests for documents.",
-        },
-        "prompt": "You are an airline agent. Ask for passport, destination, bags, seating preference.",
-    },
-    "immigration": {
-        "name": "Immigration Control",
-        "description": "Speaking with immigration officers.",
-        "difficulty": "advanced",
-        "nuance": {
-            "ja": "Officers speak neutral, sometimes blunt Japanese. They ask『滞在目的』and verify documentation without small talk.",
-            "zh": "Chinese immigration asks direct, formal questions:『来中国的目的？』『住哪里？』Tone is official, not friendly.",
-        },
-        "prompt": "You are an immigration officer. Ask about purpose of trip, length of stay, accommodation, and items carried.",
-    },
-    "business_meeting": {
-        "name": "Business Meeting",
-        "description": "Discussing work topics with business partners.",
-        "difficulty": "advanced",
-        "nuance": {
-            "ja": "Expect very formal keigo and indirect negotiation. Phrases like『ご検討いただけますと幸いです』are common.",
-            "zh": "Chinese business culture may be direct in goals but respectful. Small talk about travel or meals often precedes negotiations.",
-        },
-        "prompt": "You are a business professional. Exchange greetings, confirm agenda, and discuss deliverables.",
-    },
-    "office_reception": {
-        "name": "Office Reception",
-        "description": "Arriving for a professional meeting.",
-        "difficulty": "intermediate",
-        "nuance": {
-            "ja": "Receptionists often ask for names + company:『どちらの会社様ですか？』.",
-            "zh": "Chinese receptionists may simply ask『找谁？』or『您有预约吗？』",
-        },
-        "prompt": "You are a receptionist. Ask for name, purpose, and meeting contact.",
-    },
-    "coffee_shop": {
-        "name": "Coffee Shop",
-        "description": "Ordering drinks and pastries.",
-        "difficulty": "beginner",
-        "nuance": {
-            "ja": "Staff confirm size and temperature politely:『ホットとアイスどちらになさいますか？』.",
-            "zh": "Expect concise questions:『大杯还是中杯？』『要不要加糖？』.",
-        },
-        "prompt": "You are a barista. Ask about drink type, size, temperature, and pastries.",
-    },
-    "pharmacy": {
-        "name": "Pharmacy Visit",
-        "description": "Buying medicine or asking for advice.",
-        "difficulty": "intermediate",
-        "nuance": {
-            "ja": "Pharmacists ask detailed questions about symptoms and duration using polite Japanese.",
-            "zh": "Pharmacists may explain medicine quickly and ask『有过敏吗？』or『哪里不舒服？』.",
-        },
-        "prompt": "You are a pharmacist. Ask about symptoms, allergies, and medicine needs.",
-    },
-    "museum_ticketing": {
-        "name": "Museum Ticket Purchase",
-        "description": "Buying tickets and asking about exhibits.",
-        "difficulty": "beginner",
-        "nuance": {
-            "ja": "Often very polite:『何名様ですか？』. Staff might offer audio guides.",
-            "zh": "Staff will directly ask『几张票？』and provide brief instructions.",
-        },
-        "prompt": "You are a ticket agent. Ask how many tickets they want, and if they want audio guides.",
-    },
-    "car_rental": {
-        "name": "Car Rental",
-        "description": "Renting a car.",
-        "difficulty": "advanced",
-        "nuance": {
-            "ja": "Expect detailed explanations about insurance, returning time, and fuel policy.",
-            "zh": "Car rental offices may ask direct questions about license and insurance, often quickly.",
-        },
-        "prompt": "You are a rental agent. Ask for license, car type, insurance, and return details.",
-    },
-}
+def _get_enriched_tokens(
+    text: str, language: str, session_id: str
+) -> List[Dict[str, Any]]:
+    """Helper to tokenize and fetch SRS levels."""
+    enriched_tokens = []
+    try:
+        if language == "japanese":
+            raw_tokens = nlp_service.process_japanese(text)
+        elif language == "chinese":
+            raw_tokens = nlp_service.process_chinese(text)
+        else:
+            raw_tokens = []
+
+        for t in raw_tokens:
+            level = vocab_service.get_user_word_level(session_id, t["base"], language)
+            enriched_tokens.append(
+                TokenData(
+                    surface=t["surface"],
+                    reading=t["reading"],
+                    base_form=t["base"],
+                    srs_level=level,
+                ).dict()
+            )
+    except Exception as e:
+        logger.error(f"Tokenization failed: {e}")
+    return enriched_tokens
 
 
 # Simple in-memory session store: { "session_id": [ {"role":..., "content":...} ] }
@@ -247,6 +142,44 @@ class ErrorResponse(BaseModel):
     error: str
 
 
+class TokenData(BaseModel):
+    """Represents a single word/character with learning data."""
+
+    surface: str  # The word as displayed (e.g., "猫")
+    reading: str  # Pinyin or Furigana (e.g., "neko")
+    base_form: str  # Dictionary form for DB lookup
+    srs_level: int = 0  # 0=New, 1-3=Learning, 4=Mastered
+    pos: Optional[str] = None
+
+
+# --- UPDATED RESPONSE MODEL ---
+class ChatResponse(BaseModel):
+    """
+    Unified response model replacing TextChatResponse/VoiceChatResponse.
+    It carries both raw text (for TTS/History) and tokens (for UI).
+    """
+
+    messageId: str
+    audioId: Optional[str] = None
+
+    # Text Data
+    userText: str
+    translatedUserText: Optional[str] = None
+
+    botResponse: str  # Raw string (legacy support)
+    botResponseEnglish: str
+
+    # The New Smart Transcript Data
+    botTokens: List[TokenData] = []
+
+
+class VocabUpdateRequest(BaseModel):
+    word_base: str
+    language: str
+    new_level: int
+    user_id: str = "default_user"
+
+
 # ==============================================================================
 # 2. Lifespan Event (Model Loading & Cleanup)
 # ==============================================================================
@@ -273,20 +206,6 @@ async def lifespan(app: FastAPI):
     os.makedirs(Config.AUDIO_DIR, exist_ok=True)
 
     # 2. Load Models (Independently!)
-
-    # --- Load VQA Service ---
-    # try:
-
-    #     def _load_vqa():
-    #         service = VQAService()
-    #         service.load_model()
-    #         return service
-
-    #     logger.info("Loading VQA Service (Phi-3-Vision)...")
-    #     models["vqa"] = await asyncio.to_thread(_load_vqa)
-    # except Exception as e:
-    #     logger.error(f"❌ VQA Service FAILED to load: {e}")
-    #     # We do NOT raise here, so the app continues loading other models
 
     # --- Load Language Model ---
     try:
@@ -463,14 +382,9 @@ async def _save_uploaded_audio_async(audio_file: UploadFile) -> str:
 
 
 async def _process_text_conversation_async(
-    user_message: str, language: str
+    user_message: str, language: str, session_id: str = "default"
 ) -> Dict[str, Any]:
-    """
-    Async version of _process_text_conversation.
-    Runs I/O-bound tasks concurrently.
-    """
-    # 1. Generate bot response (CPU-bound, run in thread)
-    # This is the first blocking call, so we await it.
+    # 1. Generate bot response
     try:
         bot_response = await asyncio.to_thread(
             models["language_model"].generate_response,
@@ -479,25 +393,24 @@ async def _process_text_conversation_async(
             use_history=False,
         )
     except Exception as e:
-        logger.error(f"Language model generation failed: {e}", exc_info=True)
-        bot_response = "Sorry, I had trouble generating a response."
+        logger.error(f"LLM Error: {e}")
+        bot_response = "Error generating response."
 
-    # 2. Concurrently run translation and TTS generation
-    # These tasks can all run at the same time!
+    # 2. Tokenize (Using the new helper)
+    bot_tokens = _get_enriched_tokens(bot_response, language, session_id)
+
+    # 3. Existing Concurrent Tasks (TTS & Translation)
     audio_id = str(uuid.uuid4())
     audio_path = os.path.join(Config.AUDIO_DIR, f"{audio_id}.mp3")
 
     try:
         results = await asyncio.gather(
-            # Task A: Translate user text (I/O-bound, run in thread)
             asyncio.to_thread(
                 models["translator"].translate_to_english, user_message, language
             ),
-            # Task B: Translate bot text (I/O-bound, run in thread)
             asyncio.to_thread(
                 models["translator"].translate_to_english, bot_response, language
             ),
-            # Task C: Generate audio (Blocking I/O, run in thread)
             asyncio.to_thread(
                 audio_service.speak,
                 audio_path=audio_path,
@@ -505,22 +418,20 @@ async def _process_text_conversation_async(
                 language=language,
             ),
         )
-
-        # Unpack results
         translated_user_text = results[0]
         bot_response_english = results[1]
-        # results[2] is for the audio task, which doesn't return anything
 
     except Exception as e:
-        logger.error(f"Translation or TTS failed: {e}", exc_info=True)
-        translated_user_text = "(Translation failed)"
-        bot_response_english = "(Translation failed)"
-        audio_id = ""  # No audio was generated
+        logger.error(f"Translation/TTS failed: {e}")
+        translated_user_text = "(Error)"
+        bot_response_english = "(Error)"
+        audio_id = ""
 
-    # 4. Return the data structure
     return {
-        "translatedUserText": f"[English translation: {translated_user_text}]",
+        "userText": user_message,
+        "translatedUserText": translated_user_text,
         "botResponse": bot_response,
+        "botTokens": bot_tokens,  # Included!
         "botResponseEnglish": bot_response_english,
         "audioId": audio_id,
     }
@@ -600,139 +511,6 @@ async def _fetch_image_async(image_url: str) -> Image.Image:
     except Exception as e:
         logger.error(f"Failed to fetch image from {image_url}: {e}")
         raise
-
-
-async def _query_vqa_async(image: Image.Image, question_en: str) -> str:
-    """
-    Runs the image and English question through Phi-3-Vision.
-    """
-
-    def _run_inference():
-        # 1. Format the prompt for Roleplay
-        # We instruct the model to be concise and helpful.
-        prompt = f"<|user|>\n<|image_1|>\n{question_en}<|end|>\n<|assistant|>\n"
-
-        # 2. Process Inputs
-        inputs = models["vqa"]["processor"](prompt, [image], return_tensors="pt").to(
-            "cuda"
-        )
-
-        # 3. Generate Response parameters
-        generation_args = {
-            "max_new_tokens": 100,
-            "temperature": 0.7,
-            "do_sample": True,
-        }
-
-        # 4. Generate
-        generate_ids = models["vqa"]["model"].generate(
-            **inputs,
-            eos_token_id=models["vqa"]["processor"].tokenizer.eos_token_id,
-            **generation_args,
-        )
-
-        # 5. Decode
-        # Remove input tokens to get just the answer
-        generate_ids = generate_ids[:, inputs["input_ids"].shape[1] :]
-        response = models["vqa"]["processor"].batch_decode(
-            generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False
-        )[0]
-
-        return response
-
-    return await asyncio.to_thread(_run_inference)
-
-
-async def _process_image_guess_async(
-    audio_file: UploadFile, language: str, image_url: str
-) -> Dict[str, Any]:
-    """
-    Orchestrates the VQA pipeline:
-    Audio -> Transcribe -> Translate (En) -> VQA -> Translate (Target) -> TTS
-    """
-    input_audio_path = None
-
-    try:
-        # 1. Parallel Task: Save Audio & Fetch Image
-        save_task = asyncio.create_task(_save_uploaded_audio_async(audio_file))
-        fetch_task = asyncio.create_task(_fetch_image_async(image_url))
-
-        input_audio_path = await save_task
-        image = await fetch_task
-
-        # 2. Transcribe User Audio (Target Language)
-        user_text_native = await asyncio.to_thread(
-            models["transcription_model"].transcribe_audio,
-            audio_file=input_audio_path,
-            language=language,
-        )
-        logger.info(f"User asked (Native): {user_text_native}")
-
-        # 3. Translate User Question -> English (for VQA model)
-        user_text_en = await asyncio.to_thread(
-            models["translator"].translate_to_english, user_text_native, language
-        )
-        logger.info(f"User asked (English): {user_text_en}")
-
-        # 4. VQA Inference (GPU Bound)
-        # Note: We run this in a thread because analyze_image is synchronous blocking code
-        if "vqa" not in models:
-            raise HTTPException(status_code=503, detail="VQA Model not loaded")
-
-        vqa_answer_en = await asyncio.to_thread(
-            models["vqa"].analyze_image, image=image, question_en=user_text_en
-        )
-        logger.info(f"VQA Answer (English): {vqa_answer_en}")
-
-        # 5. Translate Answer -> Native Language
-        vqa_answer_native = await asyncio.to_thread(
-            models["translator"].translate_from_english, vqa_answer_en, language
-        )
-
-        # 6. Generate TTS Audio
-        audio_filename = f"response_{uuid.uuid4().hex}"
-        audio_path = await _get_or_create_cached_audio_async(
-            audio_filename, vqa_answer_native, language
-        )
-        audio_url_path = f"/api/audio/{audio_filename}"
-
-        # 7. Encode Image for Frontend (Consistency)
-        def _encode_image(img):
-            buffered = BytesIO()
-            img.save(buffered, format="JPEG")
-            return base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-        img_str = await asyncio.to_thread(_encode_image, image)
-
-        return {
-            "image": img_str,
-            "answer_text": vqa_answer_native,
-            "audio_url": audio_url_path,
-        }
-
-    finally:
-        # Cleanup input audio
-        if input_audio_path and os.path.exists(input_audio_path):
-            try:
-                await asyncio.to_thread(os.remove, input_audio_path)
-            except Exception as e:
-                logger.error(f"Cleanup failed: {e}")
-
-
-async def _query_vqa_async(image: Image.Image, question_en: str) -> str:
-    """
-    Non-blocking wrapper for the VQA service.
-    Runs the heavy GPU inference in a separate thread.
-    """
-    if "vqa" not in models:
-        raise RuntimeError("VQA Model not loaded")
-
-    # We use asyncio.to_thread to run the synchronous service method
-    response = await asyncio.to_thread(
-        models["vqa"].analyze_image, image=image, question_en=question_en
-    )
-
-    return response
 
 
 async def _fetch_random_image_async() -> Optional[str]:
@@ -826,6 +604,9 @@ async def _process_scenario_conversation_async(
             external_history=current_history,  # Pass the session specific history
             system_prompt_override=scenario_prompt,
         )
+        # Generate Tokens for Smart Transcript
+        bot_tokens = _get_enriched_tokens(bot_response, language, session_id)
+        # -----------------------------
 
         # 5. Update Session Memory
         scenario_sessions[session_id].append({"role": "user", "content": user_text})
@@ -833,23 +614,16 @@ async def _process_scenario_conversation_async(
             {"role": "assistant", "content": bot_response}
         )
 
-        # Limit memory to last 10 turns to prevent context overflow
+        # Limit memory... (keep existing logic)
         if len(scenario_sessions[session_id]) > 10:
             scenario_sessions[session_id] = scenario_sessions[session_id][-10:]
 
-        # Generate a unique ID for this specific interaction
         message_id = str(uuid.uuid4())
-        # 6. Translate & TTS (Concurrent)
         audio_id = str(uuid.uuid4())
         audio_path = os.path.join(Config.AUDIO_DIR, f"{audio_id}.mp3")
-        await asyncio.to_thread(
-            audio_service.speak,
-            audio_path=audio_path,
-            text=bot_response,
-            language=language,
-        )
 
-        # FIRE AND FORGET: Schedule translation for later
+        # 6. Translate & TTS
+        # FIRE AND FORGET Translation
         background_tasks.add_task(
             run_translation_task, user_text, bot_response, language, message_id
         )
@@ -870,11 +644,11 @@ async def _process_scenario_conversation_async(
         )
 
         return {
-            "transcribedText": user_text
-            if audio_file
-            else None,  # Only return if transcribed
+            # Map 'transcribedText' to 'userText' for consistency with ChatResponse model
+            "userText": user_text,
             "translatedUserText": results[0],
             "botResponse": bot_response,
+            "botTokens": bot_tokens,  # <--- Return the tokens
             "botResponseEnglish": results[1],
             "audioId": audio_id,
             "messageId": message_id,
@@ -1005,15 +779,15 @@ async def _translate_and_cache(
 
 @app.post(
     "/api/text-chat",
-    response_model=TextChatResponse,
+    response_model=ChatResponse,
     responses={503: {"model": ErrorResponse}},
     summary="Text Chat Endpoint",
 )
 async def text_chat(
     background_tasks: BackgroundTasks,
     language: str = Form(...),
-    text: str = Form(...),  # Changed from Pydantic model to Form parameter
-    session_id: str = Form(default=""),
+    text: str = Form(...),
+    session_id: str = Form(default="default_user"),
 ):
     """Handle text-based chat API requests."""
     if "language_model" not in models or "translator" not in models:
@@ -1026,11 +800,11 @@ async def text_chat(
         # Generate unique message ID
         message_id = str(uuid.uuid4())
 
-        # Process the conversation
-        result = await _process_text_conversation_async(text, language)
+        # Call the updated processor
+        result = await _process_text_conversation_async(text, language, session_id)
 
-        # Add message_id to response
-        result["messageId"] = message_id
+        # Add message ID
+        result["messageId"] = str(uuid.uuid4())
 
         # Start background translation task
         asyncio.create_task(
@@ -1051,7 +825,7 @@ async def text_chat(
 
 @app.post(
     "/api/voice-chat",
-    response_model=VoiceChatResponse,
+    response_model=ChatResponse,  # <--- CHANGED from VoiceChatResponse
     responses={503: {"model": ErrorResponse}},
     summary="Voice Chat Endpoint",
 )
@@ -1218,6 +992,39 @@ async def scenario_chat_endpoint(
     except Exception as e:
         logger.error(f"Scenario chat failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/vocab/update")
+async def update_vocab_endpoint(data: VocabUpdateRequest):
+    """Update the SRS level for a specific word."""
+    try:
+        vocab_service.update_word_level(
+            user_id=data.user_id,
+            word=data.word_base,
+            language=data.language,
+            new_level=data.new_level,
+        )
+        return JSONResponse({"status": "success", "level": data.new_level})
+    except Exception as e:
+        logger.error(f"Vocab update failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/translate-word")
+async def translate_word_endpoint(text: str = Form(...), language: str = Form(...)):
+    """Helper to translate a single word for the modal."""
+    if "translator" not in models:
+        raise HTTPException(status_code=503, detail="Translator not ready")
+
+    try:
+        # Use existing translator service
+        translation = await asyncio.to_thread(
+            models["translator"].translate_to_english, text, language
+        )
+        return JSONResponse({"translation": translation})
+    except Exception as e:
+        logger.error(f"Word translation failed: {e}")
+        return JSONResponse({"translation": "Definition not found"})
 
 
 @app.get("/api/translation/{message_id}")
